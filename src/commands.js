@@ -1,6 +1,4 @@
 // src/commands.js
-// All slash command definitions and handlers
-
 const {
   SlashCommandBuilder,
   ModalBuilder,
@@ -10,10 +8,9 @@ const {
 } = require('discord.js');
 
 const { addSale, getUserStats, getRankForAmount, getRecentSales, deleteSale } = require('./database');
-const { buildLeaderboardEmbed, buildSaleAnnouncementEmbed, formatMoney } = require('./leaderboard');
+const { buildLeaderboardEmbed, formatMoney } = require('./leaderboard');
 
 // ── /sale ─────────────────────────────────────────────────────────────────────
-// Opens a modal form for logging a new sale
 const saleCommand = {
   data: new SlashCommandBuilder()
     .setName('sale')
@@ -22,49 +19,49 @@ const saleCommand = {
   async execute(interaction) {
     const modal = new ModalBuilder()
       .setCustomId('saleModal')
-      .setTitle('Log New Sale — Vivid Life');
+      .setTitle('🔥 Log New Sale — OFG Life');
 
-    const clientName = new TextInputBuilder()
-      .setCustomId('clientName')
-      .setLabel('Client Full Name')
+    const carrier = new TextInputBuilder()
+      .setCustomId('carrier')
+      .setLabel('Carrier')
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder('John Smith')
+      .setPlaceholder('e.g. Mutual of Omaha, Transamerica, MOO')
       .setRequired(true);
 
-    const policyType = new TextInputBuilder()
-      .setCustomId('policyType')
-      .setLabel('Policy Type')
+    const product = new TextInputBuilder()
+      .setCustomId('product')
+      .setLabel('Product')
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder('e.g. Term Life, Whole Life, IUL, Final Expense')
+      .setPlaceholder('e.g. IUL, Term Life, Whole Life, Final Expense')
+      .setRequired(true);
+
+    const leadType = new TextInputBuilder()
+      .setCustomId('leadType')
+      .setLabel('Lead Type')
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder('e.g. A Lead, B Lead, Referral, Cold Call')
+      .setRequired(true);
+
+    const presentationType = new TextInputBuilder()
+      .setCustomId('presentationType')
+      .setLabel('Presentation Type')
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder('e.g. APT, Drop-In, Virtual, Phone')
       .setRequired(true);
 
     const premium = new TextInputBuilder()
       .setCustomId('premium')
-      .setLabel('Annual Premium Amount ($)')
+      .setLabel('Submitted AP ($)')
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder('e.g. 1200')
+      .setPlaceholder('e.g. 2844')
       .setRequired(true);
 
-    const carrier = new TextInputBuilder()
-      .setCustomId('carrier')
-      .setLabel('Carrier / Insurance Company')
-      .setStyle(TextInputStyle.Short)
-      .setPlaceholder('e.g. Mutual of Omaha, Transamerica')
-      .setRequired(false);
-
-    const notes = new TextInputBuilder()
-      .setCustomId('notes')
-      .setLabel('Notes (optional)')
-      .setStyle(TextInputStyle.Paragraph)
-      .setPlaceholder('Any additional details...')
-      .setRequired(false);
-
     modal.addComponents(
-      new ActionRowBuilder().addComponents(clientName),
-      new ActionRowBuilder().addComponents(policyType),
-      new ActionRowBuilder().addComponents(premium),
       new ActionRowBuilder().addComponents(carrier),
-      new ActionRowBuilder().addComponents(notes),
+      new ActionRowBuilder().addComponents(product),
+      new ActionRowBuilder().addComponents(leadType),
+      new ActionRowBuilder().addComponents(presentationType),
+      new ActionRowBuilder().addComponents(premium),
     );
 
     await interaction.showModal(modal);
@@ -108,14 +105,14 @@ const myStatsCommand = {
       color: parseInt((rank.color || '#57F287').replace('#', ''), 16),
       title: `📊 Stats for ${interaction.user.displayName}`,
       fields: [
-        { name: '📅 Today',        value: formatMoney(stats?.daily_total),   inline: true },
-        { name: '📆 This Week',    value: formatMoney(stats?.weekly_total),  inline: true },
-        { name: '🏆 This Month',   value: formatMoney(stats?.monthly_total), inline: true },
-        { name: '📋 Monthly Sales',value: `${stats?.monthly_count || 0} policies`, inline: true },
-        { name: '🎖️ Current Rank', value: `${rank.emoji} ${rank.name}`,      inline: true },
+        { name: '📅 Today',         value: formatMoney(stats?.daily_total),   inline: true },
+        { name: '📆 This Week',     value: formatMoney(stats?.weekly_total),  inline: true },
+        { name: '🏆 This Month',    value: formatMoney(stats?.monthly_total), inline: true },
+        { name: '📋 Monthly Sales', value: `${stats?.monthly_count || 0} policies`, inline: true },
+        { name: '🎖️ Current Rank',  value: `${rank.emoji} ${rank.name}`,      inline: true },
       ],
       timestamp: new Date().toISOString(),
-      footer: { text: 'Vivid Life Bot • Production Tracker' },
+      footer: { text: 'OFG Life Bot • Production Tracker' },
     };
 
     await interaction.reply({ embeds: [embed], ephemeral: true });
@@ -145,7 +142,7 @@ const recentSalesCommand = {
       color: 0x3498DB,
       title: '📋 Recent Sales',
       description: desc,
-      footer: { text: 'Vivid Life Bot • Production Tracker' },
+      footer: { text: 'OFG Life Bot • Production Tracker' },
     };
 
     await interaction.reply({ embeds: [embed] });
