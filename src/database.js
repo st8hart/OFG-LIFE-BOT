@@ -121,6 +121,17 @@ function getRecentSales(limit = 5) {
   return db.sales.slice(-limit).reverse();
 }
 
+function getGoal() {
+  const db = loadDB();
+  return db.goal || parseFloat(process.env.MONTHLY_GOAL || 250000);
+}
+
+function setGoal(amount) {
+  const db = loadDB();
+  db.goal = amount;
+  saveDB(db);
+}
+
 function deleteSale(saleId, userId) {
   const db = loadDB();
   const idx = db.sales.findIndex(s => s.id === saleId && s.user_id === userId);
@@ -130,4 +141,4 @@ function deleteSale(saleId, userId) {
   return { changes: 1 };
 }
 
-module.exports = { addSale, getLeaderboard, getMonthlyTotal, getUserStats, getRanks, getRankForAmount, getRecentSales, deleteSale };
+module.exports = { addSale, getLeaderboard, getMonthlyTotal, getUserStats, getRanks, getRankForAmount, getRecentSales, deleteSale, getGoal, setGoal };

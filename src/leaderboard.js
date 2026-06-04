@@ -4,13 +4,13 @@
 const { EmbedBuilder } = require('discord.js');
 const { getLeaderboard, getMonthlyTotal, getRankForAmount } = require('./database');
 
-const MONTHLY_GOAL = parseFloat(process.env.MONTHLY_GOAL || 200000);
+const { getGoal } = require('./database');
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 const PERIOD_LABELS = {
   daily:   '📅 TODAY\'S',
   weekly:  '📆 THIS WEEK\'S',
-  monthly: '🏆 MAY 2026',
+  monthly: '🏆 ',
 };
 const PERIOD_COLORS = {
   daily:   0x3498DB,
@@ -33,19 +33,24 @@ function formatMoney(n) {
 function buildLeaderboardEmbed(period) {
   const rows = getLeaderboard(period);
   const monthlyTotal = getMonthlyTotal();
-  const label = PERIOD_LABELS[period] || '🏆';
+  const monthName = new Date().toLocaleString('en-US', { month: 'long' }).toUpperCase();
+  const year = new Date().getFullYear();
+  const label = period === 'monthly' 
+    ? `🏆 ${monthName} ${year}` 
+    : (PERIOD_LABELS[period] || '🏆');
   const color = PERIOD_COLORS[period] || 0xF1C40F;
 
   const embed = new EmbedBuilder()
     .setColor(color)
-    .setTitle(`🏆 VIVID LIFE ${label} LEADERBOARD`)
+    .setTitle(`🏆 OFG LIFE ${label} LEADERBOARD`)
     .setTimestamp();
 
   // Monthly team progress (always shown)
-  const progressBar = buildProgressBar(monthlyTotal, MONTHLY_GOAL);
+  const currentGoal = getGoal();
+  const progressBar = buildProgressBar(monthlyTotal, currentGoal);
   embed.addFields({
     name: `📊 Monthly Team Progress`,
-    value: `**Team Total:** ${formatMoney(monthlyTotal)}\n**Goal:** ${formatMoney(MONTHLY_GOAL)}\n${progressBar}`,
+    value: `**Team Total:** ${formatMoney(monthlyTotal)}\n**Goal:** ${formatMoney(currentGoal)}\n${progressBar}`,
     inline: false,
   });
 
@@ -78,7 +83,7 @@ function buildLeaderboardEmbed(period) {
     embed.addFields({ name: '─────────────────────', value: restText, inline: false });
   }
 
-  embed.setFooter({ text: 'Vivid Life Bot • Production Tracker' });
+  embed.setFooter({ text: 'OFG Life Bot • Production Tracker' });
   return embed;
 }
 
@@ -96,7 +101,7 @@ function buildSaleAnnouncementEmbed(sale, userStats, rank) {
       { name: '📅 Monthly Total', value: formatMoney(userStats.monthly_total), inline: true },
     )
     .setTimestamp()
-    .setFooter({ text: 'Vivid Life Bot • Production Tracker' });
+    .setFooter({ text: 'OFG Life Bot • Production Tracker' });
 
   if (sale.notes) {
     embed.addFields({ name: '📝 Notes', value: sale.notes, inline: false });

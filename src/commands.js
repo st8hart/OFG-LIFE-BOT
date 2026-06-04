@@ -7,7 +7,7 @@ const {
   ActionRowBuilder,
 } = require('discord.js');
 
-const { addSale, getUserStats, getRankForAmount, getRecentSales, deleteSale } = require('./database');
+const { addSale, getUserStats, getRankForAmount, getRecentSales, deleteSale, getGoal, setGoal } = require('./database');
 const { buildLeaderboardEmbed, formatMoney } = require('./leaderboard');
 
 // ── /sale ─────────────────────────────────────────────────────────────────────
@@ -175,10 +175,39 @@ const deleteSaleCommand = {
   },
 };
 
+// ── /setgoal ──────────────────────────────────────────────────────────────────
+const setGoalCommand = {
+  data: new SlashCommandBuilder()
+    .setName('setgoal')
+    .setDescription('Set the monthly team production goal 🎯')
+    .addIntegerOption(opt =>
+      opt.setName('amount')
+        .setDescription('Goal amount in dollars (e.g. 250000)')
+        .setRequired(true)
+    ),
+
+  async execute(interaction) {
+    // Check if user has admin/manage server permission
+    if (!interaction.member.permissions.has('ManageGuild')) {
+      return interaction.reply({ content: '❌ You need Admin permissions to set the goal.', ephemeral: true });
+    }
+
+    const amount = interaction.options.getInteger('amount');
+    if (amount <= 0) return interaction.reply({ content: '❌ Goal must be a positive number.', ephemeral: true });
+
+    setGoal(amount);
+
+    await interaction.reply({
+      content: `🎯 Monthly goal set to **$${amount.toLocaleString()}**! The leaderboard will update automatically.`,
+    });
+  },
+};
+
 module.exports = {
   saleCommand,
   leaderboardCommand,
   myStatsCommand,
   recentSalesCommand,
   deleteSaleCommand,
+  setGoalCommand,
 };

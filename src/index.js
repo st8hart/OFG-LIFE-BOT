@@ -1,7 +1,7 @@
 // src/index.js
 require('dotenv').config();
 const { Client, GatewayIntentBits, Events, Collection } = require('discord.js');
-const { addSale, getUserStats, getRankForAmount } = require('./database');
+const { addSale, getUserStats, getRankForAmount, getMonthlyTotal, getGoal, setGoal } = require('./database');
 const { buildLeaderboardEmbed, formatMoney } = require('./leaderboard');
 const {
   saleCommand,
@@ -9,12 +9,13 @@ const {
   myStatsCommand,
   recentSalesCommand,
   deleteSaleCommand,
+  setGoalCommand,
 } = require('./commands');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.commands = new Collection();
-const commands = [saleCommand, leaderboardCommand, myStatsCommand, recentSalesCommand, deleteSaleCommand];
+const commands = [saleCommand, leaderboardCommand, myStatsCommand, recentSalesCommand, deleteSaleCommand, setGoalCommand];
 for (const cmd of commands) client.commands.set(cmd.data.name, cmd);
 
 // ── Ready ─────────────────────────────────────────────────────────────────────
@@ -103,6 +104,30 @@ async function handleSaleModal(interaction) {
     }
   }
 
+  // Check if monthly total has hit or exceeded the goal → auto-increment by $50k
+  const currentGoal = getGoal();
+  const monthlyTotal = getMonthlyTotal();
+  if (monthlyTotal >= currentGoal) {
+    const newGoal = currentGoal + 50000;
+    setGoal(newGoal);
+    const salesChannelId2 = process.env.SALES_CHANNEL_ID;
+    if (salesChannelId2) {
+      try {
+        const ch = await client.channels.fetch(salesChannelId2);
+        await ch.send([
+          `🎉🏆 **GOAL CRUSHED! $${currentGoal.toLocaleString()} ACHIEVED!** 🏆🎉`,
+          ``,
+          `🚀 The team has blown past the goal! Time to level up!`,
+          `🆕 **New Monthly Goal: $${newGoal.toLocaleString()}**`,
+          ``,
+          `Let's get it! 💪🔥`,
+        ].join('\n'));
+      } catch (err) {
+        console.error('Goal announcement error:', err.message);
+      }
+    }
+  }
+
   await interaction.editReply({
     content: `✅ Sale logged! **${formatMoney(premium)}** AP.\nMonthly total: **${formatMoney(stats?.monthly_total)}** · ${rank.emoji} ${rank.name}`,
   });
@@ -110,6 +135,21 @@ async function handleSaleModal(interaction) {
 
 // ── Scheduled leaderboards ────────────────────────────────────────────────────
 function scheduleLeaderboards(client) {
+  const postFinalLeaderboard = async (period, title) => {
+    const channelId = process.env.LEADERBOARD_CHANNEL_ID;
+    if (!channelId) return;
+    try {
+      const channel = await client.channels.fetch(channelId);
+      const embed = buildLeaderboardEmbed(period);
+      embed.setTitle(`${title} — ${embed.data.title}`);
+      embed.setColor(0xFF4500);
+      await channel.send({ content: `🚨 **${title}** — Final standings before reset!`, embeds: [embed] });
+      console.log(`⏰ Posted ${title}`);
+    } catch (err) {
+      console.error('Final leaderboard error:', err.message);
+    }
+  };
+
   const postLeaderboard = async (period) => {
     const channelId = process.env.LEADERBOARD_CHANNEL_ID;
     if (!channelId) return;
@@ -129,16 +169,38 @@ function scheduleLeaderboards(client) {
   // Weekly leaderboard every 8 hours
   setInterval(() => postLeaderboard('weekly'), 8 * 60 * 60 * 1000);
 
-  // Monthly leaderboard on Mon, Wed, Fri
+  // Check every hour for scheduled and end-of-period posts
   setInterval(() => {
-    const day = new Date().getDay(); // 0=Sun,1=Mon,2=Tue,3=Wed,4=Thu,5=Fri,6=Sat
-    if (day === 1 || day === 3 || day === 5) {
-      const hour = new Date().getHours();
-      if (hour === 9) postLeaderboard('monthly'); // posts at 9am on Mon/Wed/Fri
+    const now = new Date();
+    const hour = now.getHours();
+    const day = now.getDay();    // 0=Sun,1=Mon,2=Tue,3=Wed,4=Thu,5=Fri,6=Sat
+    const date = now.getDate();
+
+    // Monthly leaderboard on Mon, Wed, Fri at 9am
+    if ((day === 1 || day === 3 || day === 5) && hour === 9) {
+      postLeaderboard('monthly');
     }
+
+    // 🔚 END OF DAY — Final daily leaderboard at 11pm every night
+    if (hour === 23) {
+      postFinalLeaderboard('daily', '🔚 FINAL DAILY LEADERBOARD');
+    }
+
+    // 🔚 END OF WEEK — Final weekly leaderboard at 11pm every Sunday
+    if (day === 0 && hour === 23) {
+      postFinalLeaderboard('weekly', '🔚 FINAL WEEKLY LEADERBOARD');
+    }
+
+    // 🔚 END OF MONTH — Check if tomorrow is the 1st (last day of month at 11pm)
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    if (tomorrow.getDate() === 1 && hour === 23) {
+      postFinalLeaderboard('monthly', '🔚 FINAL MONTHLY LEADERBOARD');
+    }
+
   }, 60 * 60 * 1000); // check every hour
 
-  console.log('⏰ Leaderboards scheduled: Daily(2hr) Weekly(8hr) Monthly(Mon/Wed/Fri 9am)');
+  console.log('⏰ Leaderboards scheduled: Daily(2hr) Weekly(8hr) Monthly(Mon/Wed/Fri 9am) + End-of-period finals');
 }
 
 client.login(process.env.DISCORD_TOKEN);
