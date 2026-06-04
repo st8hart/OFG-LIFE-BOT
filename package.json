@@ -1,0 +1,15 @@
+{
+  "name": "vivid-life-sales-bot",
+  "version": "1.0.0",
+  "description": "Vivid Life Advisors Discord Sales Leaderboard Bot",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "deploy": "node src/deploy-commands.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5",
+    "better-sqlite3": "^9.4.3"
+  }
+}
