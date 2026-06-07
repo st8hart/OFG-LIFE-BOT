@@ -1,17 +1,8 @@
 // src/leaderboard.js
-// Builds the formatted Discord embeds for leaderboards
-
 const { EmbedBuilder } = require('discord.js');
-const { getLeaderboard, getMonthlyTotal, getRankForAmount } = require('./database');
-
-const { getGoal } = require('./database');
+const { getLeaderboard, getMonthlyTotal, getRankForAmount, getGoal } = require('./database');
 
 const MEDALS = ['🥇', '🥈', '🥉'];
-const PERIOD_LABELS = {
-  daily:   '📅 TODAY\'S',
-  weekly:  '📆 THIS WEEK\'S',
-  monthly: '🏆 ',
-};
 const PERIOD_COLORS = {
   daily:   0x3498DB,
   weekly:  0x9B59B6,
@@ -22,53 +13,88 @@ function buildProgressBar(current, goal, length = 20) {
   const pct = Math.min(current / goal, 1);
   const filled = Math.round(pct * length);
   const empty = length - filled;
-  const bar = '█'.repeat(filled) + '░'.repeat(empty);
-  return `\`${bar}\` ${Math.round(pct * 100)}%`;
+  return '`' + '█'.repeat(filled) + '░'.repeat(empty) + '`' + ' ' + Math.round(pct * 100) + '%';
 }
 
 function formatMoney(n) {
   return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 }
 
-function buildLeaderboardEmbed(period) {
-  const rows = getLeaderboard(period);
-  const monthlyTotal = getMonthlyTotal();
+async function getPeriodTotal(period, rows) {
+  return rows.reduce((sum, r) => sum + r.total, 0);
+}
+
+async function buildLeaderboardEmbed(period) {
+  const rows = await getLeaderboard(period);
+  const monthlyTotal = await getMonthlyTotal();
+  const currentGoal = await getGoal();
+  const periodTotal = rows.reduce((sum, r) => sum + r.total, 0);
+
   const monthName = new Date().toLocaleString('en-US', { month: 'long' }).toUpperCase();
   const year = new Date().getFullYear();
-  const label = period === 'monthly' 
-    ? `🏆 ${monthName} ${year}` 
-    : (PERIOD_LABELS[period] || '🏆');
+
+  let title = '';
+  if (period === 'daily')   title = `📅 OFG TODAY'S LEADERBOARD`;
+  if (period === 'weekly')  title = `📆 OFG THIS WEEK'S LEADERBOARD`;
+  if (period === 'monthly') title = `🏆 OFG ${monthName} ${year} LEADERBOARD`;
+
   const color = PERIOD_COLORS[period] || 0xF1C40F;
+  const embed = new EmbedBuilder().setColor(color).setTitle(title).setTimestamp();
 
-  const embed = new EmbedBuilder()
-    .setColor(color)
-    .setTitle(`🏆 OFG ${label} LEADERBOARD`)
-    .setTimestamp();
-
-  // Monthly team progress (always shown)
-  const currentGoal = getGoal();
-  const progressBar = buildProgressBar(monthlyTotal, currentGoal);
-  embed.addFields({
-    name: `📊 Monthly Team Progress`,
-    value: `**Team Total:** ${formatMoney(monthlyTotal)}\n**Goal:** ${formatMoney(currentGoal)}\n${progressBar}`,
-    inline: false,
-  });
+  // Period summary block
+  if (period === 'daily') {
+    const dayBar = buildProgressBar(periodTotal, currentGoal);
+    embed.addFields({
+      name: '📅 Today at a Glance',
+      value: [
+        `**Daily Total: ${formatMoney(periodTotal)}**`,
+        ``,
+        `🏆 Monthly Team Total: ${formatMoney(monthlyTotal)}`,
+        `🎯 Monthly Goal: ${formatMoney(currentGoal)}`,
+        `${buildProgressBar(monthlyTotal, currentGoal)}`,
+      ].join('\n'),
+      inline: false,
+    });
+  } else if (period === 'weekly') {
+    embed.addFields({
+      name: '📆 This Week at a Glance',
+      value: [
+        `**Weekly Total: ${formatMoney(periodTotal)}**`,
+        ``,
+        `🏆 Monthly Team Total: ${formatMoney(monthlyTotal)}`,
+        `🎯 Monthly Goal: ${formatMoney(currentGoal)}`,
+        `${buildProgressBar(monthlyTotal, currentGoal)}`,
+      ].join('\n'),
+      inline: false,
+    });
+  } else if (period === 'monthly') {
+    embed.addFields({
+      name: '📊 Monthly Team Progress',
+      value: [
+        `**Team Total: ${formatMoney(monthlyTotal)}**`,
+        `🎯 Goal: ${formatMoney(currentGoal)}`,
+        `${buildProgressBar(monthlyTotal, currentGoal)}`,
+      ].join('\n'),
+      inline: false,
+    });
+  }
 
   if (rows.length === 0) {
     embed.addFields({ name: '─────────────────────', value: '*No sales logged yet. Be the first!*', inline: false });
+    embed.setFooter({ text: 'OFG - Production Tracker' });
     return embed;
   }
 
-  // Top 5 (podium) vs rest
   const top5 = rows.slice(0, 5);
   const rest = rows.slice(5);
 
+  // Check hot streaks (daily_count >= 3) — only on daily leaderboard
   let podiumText = '';
   top5.forEach((row, i) => {
     const rank = getRankForAmount(row.total);
     const medal = MEDALS[i] || `#${i + 1}`;
-    const rankBadge = `${rank.emoji} ${rank.name}`;
-    podiumText += `${medal} <@${row.user_id}> — **${formatMoney(row.total)}** · ${rankBadge} *(${row.sales_count} sale${row.sales_count !== 1 ? 's' : ''})*\n`;
+    const streak = (period === 'daily' && row.sales_count >= 3) ? ' 🔥' : '';
+    podiumText += `${medal} <@${row.user_id}> — **${formatMoney(row.total)}**${streak} · ${rank.emoji} ${rank.name} *(${row.sales_count} sale${row.sales_count !== 1 ? 's' : ''})*\n`;
   });
 
   embed.addFields({ name: '─────────────────────', value: podiumText, inline: false });
@@ -77,37 +103,14 @@ function buildLeaderboardEmbed(period) {
     let restText = '';
     rest.forEach((row, i) => {
       const rank = getRankForAmount(row.total);
-      const rankBadge = `${rank.emoji} ${rank.name}`;
-      restText += `#${i + 6} <@${row.user_id}> — **${formatMoney(row.total)}** · ${rankBadge}\n`;
+      const streak = (period === 'daily' && row.sales_count >= 3) ? ' 🔥' : '';
+      restText += `#${i + 6} <@${row.user_id}> — **${formatMoney(row.total)}**${streak} · ${rank.emoji} ${rank.name}\n`;
     });
     embed.addFields({ name: '─────────────────────', value: restText, inline: false });
   }
 
-  embed.setFooter({ text: 'OFG • Production Tracker' });
+  embed.setFooter({ text: 'OFG - Production Tracker' });
   return embed;
 }
 
-function buildSaleAnnouncementEmbed(sale, userStats, rank) {
-  const embed = new EmbedBuilder()
-    .setColor(parseInt(rank.color.replace('#', ''), 16))
-    .setTitle('💰 NEW SALE LOGGED!')
-    .setDescription(`<@${sale.userId}> just closed a deal! 🎉`)
-    .addFields(
-      { name: '👤 Client',        value: sale.clientName,              inline: true },
-      { name: '📋 Policy Type',   value: sale.policyType,              inline: true },
-      { name: '💵 Premium',       value: formatMoney(sale.premium),    inline: true },
-      { name: '🏢 Carrier',       value: sale.carrier || 'N/A',        inline: true },
-      { name: '📊 Rank',          value: `${rank.emoji} ${rank.name}`, inline: true },
-      { name: '📅 Monthly Total', value: formatMoney(userStats.monthly_total), inline: true },
-    )
-    .setTimestamp()
-    .setFooter({ text: 'OFG • Production Tracker' });
-
-  if (sale.notes) {
-    embed.addFields({ name: '📝 Notes', value: sale.notes, inline: false });
-  }
-
-  return embed;
-}
-
-module.exports = { buildLeaderboardEmbed, buildSaleAnnouncementEmbed, formatMoney };
+module.exports = { buildLeaderboardEmbed, formatMoney };

@@ -1,109 +1,189 @@
-// src/database.js
-const path = require('path');
-const fs = require('fs');
+// src/database.js - Supabase version
+const { createClient } = require('@supabase/supabase-js');
 
-const DB_PATH = path.join(__dirname, '..', 'sales.json');
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
 
-function loadDB() {
-  if (!fs.existsSync(DB_PATH)) {
-    const initial = {
-      sales: [],
-      nextId: 1,
-      ranks: [
-        { id: 1, name: 'Voyager',       min_monthly: 0,      color: '#57F287', emoji: '🚀' },
-        { id: 2, name: 'Trailblazer',   min_monthly: 5000,   color: '#3498DB', emoji: '⚔️' },
-        { id: 3, name: 'Conqueror',     min_monthly: 10000,  color: '#9B59B6', emoji: '🛡️' },
-        { id: 4, name: 'Odyssey Elite', min_monthly: 25000,  color: '#F1C40F', emoji: '👑' },
-        { id: 5, name: 'Titan',         min_monthly: 50000,  color: '#E74C3C', emoji: '💎' },
-        { id: 6, name: 'Legend',        min_monthly: 100000, color: '#FF6B00', emoji: '🏆' },
-      ]
-    };
-    fs.writeFileSync(DB_PATH, JSON.stringify(initial, null, 2));
-    return initial;
+// ── Sales ─────────────────────────────────────────────────────────────────────
+
+async function addSale({ userId, username, clientName, policyType, premium, carrier, notes }) {
+  const { data, error } = await supabase.from('sales').insert([{
+    user_id: userId, username, client_name: clientName,
+    policy_type: policyType, premium, carrier: carrier || '', notes: notes || '',
+  }]).select().single();
+  if (error) throw error;
+  return data;
+}
+
+async function getLeaderboard(period) {
+  let query = supabase.from('sales').select('user_id, username, premium');
+  const now = new Date();
+  if (period === 'daily') {
+    const start = new Date(now); start.setHours(0,0,0,0);
+    query = query.gte('created_at', start.toISOString());
+  } else if (period === 'weekly') {
+    const start = new Date(now - 7 * 24 * 60 * 60 * 1000);
+    query = query.gte('created_at', start.toISOString());
+  } else if (period === 'monthly') {
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    query = query.gte('created_at', start.toISOString());
   }
-  return JSON.parse(fs.readFileSync(DB_PATH, 'utf8'));
-}
-
-function saveDB(db) {
-  fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
-}
-
-function now() {
-  return new Date().toISOString();
-}
-
-function addSale({ userId, username, clientName, policyType, premium, carrier, notes }) {
-  const db = loadDB();
-  const sale = {
-    id: db.nextId++,
-    user_id: userId,
-    username,
-    client_name: clientName,
-    policy_type: policyType,
-    premium,
-    carrier: carrier || '',
-    notes: notes || '',
-    created_at: now(),
-  };
-  db.sales.push(sale);
-  saveDB(db);
-  return sale;
-}
-
-function getLeaderboard(period) {
-  const db = loadDB();
-  const nowDate = new Date();
-
-  const filtered = db.sales.filter(s => {
-    const d = new Date(s.created_at);
-    if (period === 'daily') {
-      return d.toDateString() === nowDate.toDateString();
-    } else if (period === 'weekly') {
-      const weekAgo = new Date(nowDate - 7 * 24 * 60 * 60 * 1000);
-      return d >= weekAgo;
-    } else if (period === 'monthly') {
-      return d.getFullYear() === nowDate.getFullYear() && d.getMonth() === nowDate.getMonth();
-    }
-    return true;
-  });
-
+  const { data, error } = await query;
+  if (error) throw error;
   const map = {};
-  for (const s of filtered) {
+  for (const s of data) {
     if (!map[s.user_id]) map[s.user_id] = { user_id: s.user_id, username: s.username, total: 0, sales_count: 0 };
-    map[s.user_id].total += s.premium;
+    map[s.user_id].total += parseFloat(s.premium);
     map[s.user_id].sales_count++;
   }
-
   return Object.values(map).sort((a, b) => b.total - a.total);
 }
 
-function getMonthlyTotal() {
-  const db = loadDB();
-  const nowDate = new Date();
-  return db.sales
-    .filter(s => {
-      const d = new Date(s.created_at);
-      return d.getFullYear() === nowDate.getFullYear() && d.getMonth() === nowDate.getMonth();
-    })
-    .reduce((sum, s) => sum + s.premium, 0);
+async function getMonthlyTotal() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const { data, error } = await supabase.from('sales').select('premium').gte('created_at', start.toISOString());
+  if (error) throw error;
+  return data.reduce((sum, s) => sum + parseFloat(s.premium), 0);
 }
 
-function getUserStats(userId) {
-  const db = loadDB();
-  const nowDate = new Date();
-  const weekAgo = new Date(nowDate - 7 * 24 * 60 * 60 * 1000);
-
-  const userSales = db.sales.filter(s => s.user_id === userId);
+async function getUserStats(userId) {
+  const now = new Date();
+  const todayStart = new Date(now); todayStart.setHours(0,0,0,0);
+  const weekStart = new Date(now - 7 * 24 * 60 * 60 * 1000);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const { data, error } = await supabase.from('sales').select('premium, created_at').eq('user_id', userId);
+  if (error) throw error;
+  const daily   = data.filter(s => new Date(s.created_at) >= todayStart);
+  const weekly  = data.filter(s => new Date(s.created_at) >= weekStart);
+  const monthly = data.filter(s => new Date(s.created_at) >= monthStart);
+  // Best day ever
+  const byDay = {};
+  for (const s of data) {
+    const d = new Date(s.created_at).toDateString();
+    byDay[d] = (byDay[d] || 0) + parseFloat(s.premium);
+  }
+  const bestDay = Math.max(0, ...Object.values(byDay));
+  // Best week ever
+  const byWeek = {};
+  for (const s of data) {
+    const d = new Date(s.created_at);
+    const weekKey = `${d.getFullYear()}-W${Math.floor(d.getDate()/7)}`;
+    byWeek[weekKey] = (byWeek[weekKey] || 0) + parseFloat(s.premium);
+  }
+  const bestWeek = Math.max(0, ...Object.values(byWeek));
+  // Best month ever
+  const byMonth = {};
+  for (const s of data) {
+    const d = new Date(s.created_at);
+    const mk = `${d.getFullYear()}-${d.getMonth()}`;
+    byMonth[mk] = (byMonth[mk] || 0) + parseFloat(s.premium);
+  }
+  const bestMonth = Math.max(0, ...Object.values(byMonth));
   return {
-    daily_total:   userSales.filter(s => new Date(s.created_at).toDateString() === nowDate.toDateString()).reduce((sum, s) => sum + s.premium, 0),
-    weekly_total:  userSales.filter(s => new Date(s.created_at) >= weekAgo).reduce((sum, s) => sum + s.premium, 0),
-    monthly_total: userSales.filter(s => { const d = new Date(s.created_at); return d.getFullYear() === nowDate.getFullYear() && d.getMonth() === nowDate.getMonth(); }).reduce((sum, s) => sum + s.premium, 0),
-    monthly_count: userSales.filter(s => { const d = new Date(s.created_at); return d.getFullYear() === nowDate.getFullYear() && d.getMonth() === nowDate.getMonth(); }).length,
+    daily_total:   daily.reduce((sum, s) => sum + parseFloat(s.premium), 0),
+    daily_count:   daily.length,
+    weekly_total:  weekly.reduce((sum, s) => sum + parseFloat(s.premium), 0),
+    monthly_total: monthly.reduce((sum, s) => sum + parseFloat(s.premium), 0),
+    monthly_count: monthly.length,
+    total_ever:    data.reduce((sum, s) => sum + parseFloat(s.premium), 0),
+    total_sales:   data.length,
+    best_day:      bestDay,
+    best_week:     bestWeek,
+    best_month:    bestMonth,
   };
 }
 
+async function getTeamStats() {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const { data, error } = await supabase.from('sales').select('premium, created_at, user_id');
+  if (error) throw error;
+  const monthly = data.filter(s => new Date(s.created_at) >= monthStart);
+  // Best day ever
+  const byDay = {};
+  for (const s of data) {
+    const d = new Date(s.created_at).toDateString();
+    byDay[d] = (byDay[d] || 0) + parseFloat(s.premium);
+  }
+  const bestDayAmount = Math.max(0, ...Object.values(byDay));
+  const bestDayDate = Object.keys(byDay).find(k => byDay[k] === bestDayAmount) || 'N/A';
+  return {
+    total_sales_ever:   data.length,
+    total_ap_ever:      data.reduce((sum, s) => sum + parseFloat(s.premium), 0),
+    monthly_sales:      monthly.length,
+    monthly_ap:         monthly.reduce((sum, s) => sum + parseFloat(s.premium), 0),
+    avg_premium:        data.length ? data.reduce((sum, s) => sum + parseFloat(s.premium), 0) / data.length : 0,
+    best_day_amount:    bestDayAmount,
+    best_day_date:      bestDayDate,
+    unique_agents:      new Set(data.map(s => s.user_id)).size,
+  };
+}
+
+async function getUserTotalSales(userId) {
+  const { data, error } = await supabase.from('sales').select('id').eq('user_id', userId);
+  if (error) throw error;
+  return data.length;
+}
+
+async function getDailySalesCount(userId) {
+  const start = new Date(); start.setHours(0,0,0,0);
+  const { data, error } = await supabase.from('sales').select('id').eq('user_id', userId).gte('created_at', start.toISOString());
+  if (error) throw error;
+  return data.length;
+}
+
+async function getMonthlyTopSale() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const { data, error } = await supabase.from('sales').select('premium, user_id, username').gte('created_at', start.toISOString()).order('premium', { ascending: false }).limit(1);
+  if (error) throw error;
+  return data[0] || null;
+}
+
+async function getRecentSales(limit = 5) {
+  const { data, error } = await supabase.from('sales').select('*').order('created_at', { ascending: false }).limit(limit);
+  if (error) throw error;
+  return data;
+}
+
+async function deleteSale(saleId, userId) {
+  const { error } = await supabase.from('sales').delete().eq('id', saleId).eq('user_id', userId);
+  if (error) throw error;
+  return { changes: 1 };
+}
+
+async function adminDeleteSale(saleId) {
+  const { error } = await supabase.from('sales').delete().eq('id', saleId);
+  if (error) throw error;
+  return { changes: 1 };
+}
+
+// ── Goal ──────────────────────────────────────────────────────────────────────
+
+async function getGoal() {
+  const { data, error } = await supabase.from('settings').select('value').eq('key', 'monthly_goal').single();
+  if (error || !data) return parseFloat(process.env.MONTHLY_GOAL || 250000);
+  return parseFloat(data.value);
+}
+
+async function setGoal(amount) {
+  await supabase.from('settings').upsert({ key: 'monthly_goal', value: String(amount) });
+}
+
+// ── Ranks ─────────────────────────────────────────────────────────────────────
+
 function getRanks() {
-  return loadDB().ranks;
+  return [
+    { id: 1, name: 'Voyager',       min_monthly: 0,      color: '#57F287', emoji: '🚀' },
+    { id: 2, name: 'Trailblazer',   min_monthly: 5000,   color: '#3498DB', emoji: '⚔️' },
+    { id: 3, name: 'Conqueror',     min_monthly: 10000,  color: '#9B59B6', emoji: '🛡️' },
+    { id: 4, name: 'Odyssey Elite', min_monthly: 25000,  color: '#F1C40F', emoji: '👑' },
+    { id: 5, name: 'Titan',         min_monthly: 50000,  color: '#E74C3C', emoji: '💎' },
+    { id: 6, name: 'Legend',        min_monthly: 100000, color: '#FF6B00', emoji: '🏆' },
+  ];
 }
 
 function getRankForAmount(amount) {
@@ -116,29 +196,96 @@ function getRankForAmount(amount) {
   return current;
 }
 
-function getRecentSales(limit = 5) {
-  const db = loadDB();
-  return db.sales.slice(-limit).reverse();
+// ── Challenges ───────────────────────────────────────────────────────────────
+
+async function createChallenge(challengerId, challengerName, challengeeId, challengeeName) {
+  const { data, error } = await supabase.from('challenges').insert([{
+    challenger_id: challengerId,
+    challenger_name: challengerName,
+    challengee_id: challengeeId,
+    challengee_name: challengeeName,
+    status: 'active',
+    created_at: new Date().toISOString(),
+  }]).select().single();
+  if (error) throw error;
+  return data;
 }
 
-function getGoal() {
-  const db = loadDB();
-  return db.goal || parseFloat(process.env.MONTHLY_GOAL || 250000);
+async function getActiveChallenge(userId) {
+  const { data, error } = await supabase.from('challenges')
+    .select('*')
+    .or(`challenger_id.eq.${userId},challengee_id.eq.${userId}`)
+    .eq('status', 'active')
+    .single();
+  if (error) return null;
+  return data;
 }
 
-function setGoal(amount) {
-  const db = loadDB();
-  db.goal = amount;
-  saveDB(db);
+async function expireChallenges() {
+  await supabase.from('challenges').update({ status: 'expired' }).eq('status', 'active');
 }
 
-function deleteSale(saleId, userId) {
-  const db = loadDB();
-  const idx = db.sales.findIndex(s => s.id === saleId && s.user_id === userId);
-  if (idx === -1) return { changes: 0 };
-  db.sales.splice(idx, 1);
-  saveDB(db);
-  return { changes: 1 };
+// ── Anniversaries ─────────────────────────────────────────────────────────────
+
+async function getFirstSaleDate(userId) {
+  const { data, error } = await supabase.from('sales')
+    .select('created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+    .limit(1);
+  if (error || !data || data.length === 0) return null;
+  return new Date(data[0].created_at);
 }
 
-module.exports = { addSale, getLeaderboard, getMonthlyTotal, getUserStats, getRanks, getRankForAmount, getRecentSales, deleteSale, getGoal, setGoal };
+async function getAllAgentFirstSales() {
+  const { data, error } = await supabase.from('sales')
+    .select('user_id, username, created_at')
+    .order('created_at', { ascending: true });
+  if (error) return [];
+  const seen = {};
+  for (const s of data) {
+    if (!seen[s.user_id]) seen[s.user_id] = s;
+  }
+  return Object.values(seen);
+}
+
+// ── Monthly champion ──────────────────────────────────────────────────────────
+
+async function getMonthlyChampion() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const { data, error } = await supabase.from('sales')
+    .select('user_id, username, premium')
+    .gte('created_at', start.toISOString());
+  if (error || !data.length) return null;
+  const map = {};
+  for (const s of data) {
+    if (!map[s.user_id]) map[s.user_id] = { user_id: s.user_id, username: s.username, total: 0 };
+    map[s.user_id].total += parseFloat(s.premium);
+  }
+  return Object.values(map).sort((a, b) => b.total - a.total)[0];
+}
+
+async function getWeeklyMVP() {
+  const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const { data, error } = await supabase.from('sales')
+    .select('user_id, username, premium')
+    .gte('created_at', weekStart.toISOString());
+  if (error || !data.length) return null;
+  const map = {};
+  for (const s of data) {
+    if (!map[s.user_id]) map[s.user_id] = { user_id: s.user_id, username: s.username, total: 0, count: 0 };
+    map[s.user_id].total += parseFloat(s.premium);
+    map[s.user_id].count++;
+  }
+  return Object.values(map).sort((a, b) => b.total - a.total)[0];
+}
+
+module.exports = {
+  addSale, getLeaderboard, getMonthlyTotal, getUserStats, getTeamStats,
+  createChallenge, getActiveChallenge, expireChallenges,
+  getAllAgentFirstSales, getMonthlyChampion, getWeeklyMVP,
+  getUserTotalSales, getDailySalesCount, getMonthlyTopSale,
+  getRecentSales, deleteSale, adminDeleteSale, getGoal, setGoal,
+  getRanks, getRankForAmount,
+};
