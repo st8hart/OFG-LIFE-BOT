@@ -20,7 +20,7 @@ for (const cmd of commands) client.commands.set(cmd.data.name, cmd);
 
 // ── Ready ─────────────────────────────────────────────────────────────────────
 client.once(Events.ClientReady, (c) => {
-  console.log(`✅ OFG Life Bot is online as ${c.user.tag}`);
+  console.log(`✅ OFG is online as ${c.user.tag}`);
   scheduleLeaderboards(client);
 });
 
@@ -94,7 +94,7 @@ async function handleSaleModal(interaction) {
           `📈 **Weekly Total:** ${formatMoney(stats?.weekly_total)}`,
           `🏆 **Monthly Total:** ${formatMoney(stats?.monthly_total)}`,
         ].join('\n'),
-        footer: { text: `${rank.emoji} ${rank.name} • OFG Life Bot` },
+        footer: { text: `${rank.emoji} ${rank.name} • OFG` },
         timestamp: new Date().toISOString(),
       };
 
@@ -141,9 +141,48 @@ function scheduleLeaderboards(client) {
     try {
       const channel = await client.channels.fetch(channelId);
       const embed = buildLeaderboardEmbed(period);
-      embed.setTitle(`${title} — ${embed.data.title}`);
-      embed.setColor(0xFF4500);
-      await channel.send({ content: `🚨 **${title}** — Final standings before reset!`, embeds: [embed] });
+      embed.setColor(0xFFD700);
+
+      let intro = '';
+      if (period === 'daily') {
+        intro = [
+          ``,
+          `🌅 **A new day is here — but first, let's celebrate yesterday's grinders!**`,
+          ``,
+          `Every call made, every door knocked, every policy written — it all counts.`,
+          `Here's how the team finished yesterday. Salute to everyone who put in the work! 💪`,
+          ``,
+        ].join('
+');
+      } else if (period === 'weekly') {
+        intro = [
+          ``,
+          `🏁 **The week is officially in the books!**`,
+          ``,
+          `Another week of grinding, closing, and building toward something great.`,
+          `These are the final standings — shoutout to everyone who showed up and showed out! 🔥`,
+          `The top of this board earned it. Let's go even harder next week! 💎`,
+          ``,
+        ].join('
+');
+      } else if (period === 'monthly') {
+        intro = [
+          ``,
+          `👑 **THE MONTH IS OFFICIALLY CLOSED!**`,
+          ``,
+          `What an incredible run. Month after month this team continues to prove`,
+          `what's possible when you stay locked in and trust the process.`,
+          ``,
+          `🏆 Congratulations to everyone on this leaderboard — especially our top producers`,
+          `who set the standard for what ELITE performance looks like at OFG!`,
+          ``,
+          `New month. Fresh start. New goals. Let's make it even bigger! 🚀🔥`,
+          ``,
+        ].join('
+');
+      }
+
+      await channel.send({ content: intro, embeds: [embed] });
       console.log(`⏰ Posted ${title}`);
     } catch (err) {
       console.error('Final leaderboard error:', err.message);
@@ -163,44 +202,77 @@ function scheduleLeaderboards(client) {
     }
   };
 
-  // Daily leaderboard every 2 hours
-  setInterval(() => postLeaderboard('daily'), 2 * 60 * 60 * 1000);
-
-  // Weekly leaderboard every 8 hours
-  setInterval(() => postLeaderboard('weekly'), 8 * 60 * 60 * 1000);
-
-  // Check every hour for scheduled and end-of-period posts
-  setInterval(() => {
+  // Helper: get current hour in Central Time (UTC-5 standard, UTC-6 DST)
+  // Railway runs UTC so we convert. CDT = UTC-5, CST = UTC-6
+  const getCentralHour = () => {
     const now = new Date();
-    const hour = now.getHours();
-    const day = now.getDay();    // 0=Sun,1=Mon,2=Tue,3=Wed,4=Thu,5=Fri,6=Sat
-    const date = now.getDate();
+    // Use Intl to get accurate Central time including DST
+    const central = new Date(now.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+    return central.getHours();
+  };
 
-    // Monthly leaderboard on Mon, Wed, Fri at 9am
-    if ((day === 1 || day === 3 || day === 5) && hour === 9) {
+  const getCentralDay = () => {
+    const now = new Date();
+    const central = new Date(now.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+    return central.getDay();
+  };
+
+  const getCentralDate = () => {
+    const now = new Date();
+    const central = new Date(now.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+    return central.getDate();
+  };
+
+  // Daily leaderboard every 2 hours between 12pm and midnight Central
+  setInterval(() => {
+    const hour = getCentralHour();
+    if (hour >= 12 && hour < 24) {
+      postLeaderboard('daily');
+    }
+  }, 2 * 60 * 60 * 1000);
+
+  // Check every minute for exact-time posts (8:00am, 8:30am etc)
+  let lastPosted = {};
+  setInterval(() => {
+    const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+    const hour = now.getHours();
+    const min = now.getMinutes();
+    const day = now.getDay();
+    const key = (label) => `${label}-${now.toDateString()}-${hour}-${min}`;
+
+    // Weekly leaderboard at 9:00am Central every morning EXCEPT Monday (week just started)
+    if (hour === 9 && min === 0 && day !== 1 && !lastPosted[key('weekly')]) {
+      lastPosted[key('weekly')] = true;
+      postLeaderboard('weekly');
+    }
+
+    // Monthly leaderboard on Mon, Wed, Fri at 10am Central
+    if ((day === 1 || day === 3 || day === 5) && hour === 10 && min === 0 && !lastPosted[key('monthly')]) {
+      lastPosted[key('monthly')] = true;
       postLeaderboard('monthly');
     }
 
-    // 🔚 END OF DAY — Final daily leaderboard at 11pm every night
-    if (hour === 23) {
-      postFinalLeaderboard('daily', '🔚 FINAL DAILY LEADERBOARD');
+    // 🔚 FINAL DAILY — post at 8:00am the next morning
+    if (hour === 8 && min === 0 && !lastPosted[key('final-daily')]) {
+      lastPosted[key('final-daily')] = true;
+      postFinalLeaderboard('daily', '🔚 YESTERDAY'S FINAL DAILY LEADERBOARD');
     }
 
-    // 🔚 END OF WEEK — Final weekly leaderboard at 11pm every Sunday
-    if (day === 0 && hour === 23) {
-      postFinalLeaderboard('weekly', '🔚 FINAL WEEKLY LEADERBOARD');
+    // 🔚 FINAL WEEKLY — post at 8:00am every Monday
+    if (day === 1 && hour === 8 && min === 0 && !lastPosted[key('final-weekly')]) {
+      lastPosted[key('final-weekly')] = true;
+      postFinalLeaderboard('weekly', '🔚 LAST WEEK'S FINAL WEEKLY LEADERBOARD');
     }
 
-    // 🔚 END OF MONTH — Check if tomorrow is the 1st (last day of month at 11pm)
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    if (tomorrow.getDate() === 1 && hour === 23) {
-      postFinalLeaderboard('monthly', '🔚 FINAL MONTHLY LEADERBOARD');
+    // 🔚 FINAL MONTHLY — post at 8:00am on the 1st of each month
+    if (now.getDate() === 1 && hour === 8 && min === 0 && !lastPosted[key('final-monthly')]) {
+      lastPosted[key('final-monthly')] = true;
+      postFinalLeaderboard('monthly', '🔚 LAST MONTH'S FINAL MONTHLY LEADERBOARD');
     }
 
-  }, 60 * 60 * 1000); // check every hour
+  }, 60 * 1000); // check every minute for precision
 
-  console.log('⏰ Leaderboards scheduled: Daily(2hr) Weekly(8hr) Monthly(Mon/Wed/Fri 9am) + End-of-period finals');
+  console.log('⏰ Leaderboards scheduled in Central Time: Daily(2hr 8am-midnight) Weekly(8:30am daily) Monthly(Mon/Wed/Fri 9am) + Finals at 8am next day');
 }
 
 client.login(process.env.DISCORD_TOKEN);

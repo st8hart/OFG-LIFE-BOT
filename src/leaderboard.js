@@ -42,7 +42,7 @@ function buildLeaderboardEmbed(period) {
 
   const embed = new EmbedBuilder()
     .setColor(color)
-    .setTitle(`🏆 OFG LIFE ${label} LEADERBOARD`)
+    .setTitle(`🏆 OFG ${label} LEADERBOARD`)
     .setTimestamp();
 
   // Monthly team progress (always shown)
@@ -83,7 +83,7 @@ function buildLeaderboardEmbed(period) {
     embed.addFields({ name: '─────────────────────', value: restText, inline: false });
   }
 
-  embed.setFooter({ text: 'OFG Life Bot • Production Tracker' });
+  embed.setFooter({ text: 'OFG • Production Tracker' });
   return embed;
 }
 
@@ -101,7 +101,7 @@ function buildSaleAnnouncementEmbed(sale, userStats, rank) {
       { name: '📅 Monthly Total', value: formatMoney(userStats.monthly_total), inline: true },
     )
     .setTimestamp()
-    .setFooter({ text: 'OFG Life Bot • Production Tracker' });
+    .setFooter({ text: 'OFG • Production Tracker' });
 
   if (sale.notes) {
     embed.addFields({ name: '📝 Notes', value: sale.notes, inline: false });
