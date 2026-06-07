@@ -152,8 +152,7 @@ function scheduleLeaderboards(client) {
           `Every call made, every door knocked, every policy written — it all counts.`,
           `Here's how the team finished yesterday. Salute to everyone who put in the work! 💪`,
           ``,
-        ].join('
-');
+        ].join('\n');
       } else if (period === 'weekly') {
         intro = [
           ``,
@@ -163,8 +162,7 @@ function scheduleLeaderboards(client) {
           `These are the final standings — shoutout to everyone who showed up and showed out! 🔥`,
           `The top of this board earned it. Let's go even harder next week! 💎`,
           ``,
-        ].join('
-');
+        ].join('\n');
       } else if (period === 'monthly') {
         intro = [
           ``,
@@ -178,8 +176,7 @@ function scheduleLeaderboards(client) {
           ``,
           `New month. Fresh start. New goals. Let's make it even bigger! 🚀🔥`,
           ``,
-        ].join('
-');
+        ].join('\n');
       }
 
       await channel.send({ content: intro, embeds: [embed] });
