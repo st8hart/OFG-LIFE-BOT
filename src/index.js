@@ -147,7 +147,7 @@ function scheduleLeaderboards(client) {
       if (period === 'daily') {
         intro = [
           ``,
-          `🌅 **A new day is here — but first, let's celebrate yesterday's grinders!**`,
+          `🌅 **A new day is here — but first, lets celebrate yesterday's grinders!**`,
           ``,
           `Every call made, every door knocked, every policy written — it all counts.`,
           `Here's how the team finished yesterday. Salute to everyone who put in the work! 💪`,
@@ -160,7 +160,7 @@ function scheduleLeaderboards(client) {
           ``,
           `Another week of grinding, closing, and building toward something great.`,
           `These are the final standings — shoutout to everyone who showed up and showed out! 🔥`,
-          `The top of this board earned it. Let's go even harder next week! 💎`,
+          `The top of this board earned it. Lets go even harder next week! 💎`,
           ``,
         ].join('\n');
       } else if (period === 'monthly') {
@@ -169,12 +169,12 @@ function scheduleLeaderboards(client) {
           `👑 **THE MONTH IS OFFICIALLY CLOSED!**`,
           ``,
           `What an incredible run. Month after month this team continues to prove`,
-          `what's possible when you stay locked in and trust the process.`,
+          `whats possible when you stay locked in and trust the process.`,
           ``,
           `🏆 Congratulations to everyone on this leaderboard — especially our top producers`,
           `who set the standard for what ELITE performance looks like at OFG!`,
           ``,
-          `New month. Fresh start. New goals. Let's make it even bigger! 🚀🔥`,
+          `New month. Fresh start. New goals. Lets make it even bigger! 🚀🔥`,
           ``,
         ].join('\n');
       }
@@ -252,19 +252,19 @@ function scheduleLeaderboards(client) {
     // 🔚 FINAL DAILY — post at 8:00am the next morning
     if (hour === 8 && min === 0 && !lastPosted[key('final-daily')]) {
       lastPosted[key('final-daily')] = true;
-      postFinalLeaderboard('daily', '🔚 YESTERDAY'S FINAL DAILY LEADERBOARD');
+      postFinalLeaderboard('daily', '🔚 YESTERDAY FINAL DAILY LEADERBOARD');
     }
 
     // 🔚 FINAL WEEKLY — post at 8:00am every Monday
     if (day === 1 && hour === 8 && min === 0 && !lastPosted[key('final-weekly')]) {
       lastPosted[key('final-weekly')] = true;
-      postFinalLeaderboard('weekly', '🔚 LAST WEEK'S FINAL WEEKLY LEADERBOARD');
+      postFinalLeaderboard('weekly', '🔚 LAST WEEK FINAL WEEKLY LEADERBOARD');
     }
 
     // 🔚 FINAL MONTHLY — post at 8:00am on the 1st of each month
     if (now.getDate() === 1 && hour === 8 && min === 0 && !lastPosted[key('final-monthly')]) {
       lastPosted[key('final-monthly')] = true;
-      postFinalLeaderboard('monthly', '🔚 LAST MONTH'S FINAL MONTHLY LEADERBOARD');
+      postFinalLeaderboard('monthly', '🔚 LAST MONTH FINAL MONTHLY LEADERBOARD');
     }
 
   }, 60 * 1000); // check every minute for precision
