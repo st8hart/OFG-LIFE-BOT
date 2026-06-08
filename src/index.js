@@ -4,7 +4,8 @@ const { Client, GatewayIntentBits, Events, Collection } = require('discord.js');
 const {
   addSale, getUserStats, getRankForAmount, getMonthlyTotal, getGoal, setGoal,
   getUserTotalSales, getDailySalesCount, getMonthlyTopSale,
-  getActiveChallenge, expireChallenges, getAllAgentFirstSales,
+  getActiveChallenge, expireChallenges,
+  determineChallengeWinners, getPendingChallengeResults, clearPendingChallengeResults, getAllAgentFirstSales,
   getMonthlyChampion, getWeeklyMVP,
   getAllTimeRecords, setAllTimeRecord, getMonthlyRecords,
   getUserDailyTotal, getUserWeeklyTotal,
@@ -417,6 +418,52 @@ function scheduleLeaderboards(client) {
     if (hour === 0 && min === 0 && !lastPosted[key('reset-challenges')]) {
       lastPosted[key('reset-challenges')] = true;
       try { await expireChallenges(); } catch (err) { console.error('Challenge reset error:', err.message); }
+    }
+
+    // Determine challenge winners at 11:55pm BEFORE daily totals reset at midnight
+    if (hour === 23 && min === 55 && !lastPosted[key('challenge-winners')]) {
+      lastPosted[key('challenge-winners')] = true;
+      try { await determineChallengeWinners(); } catch (err) { console.error('Challenge winner error:', err.message); }
+    }
+
+    // Post challenge results at 9:30am — after anniversaries, clean gap before monthly
+    if (hour === 9 && min === 30 && !lastPosted[key('challenge-results')]) {
+      lastPosted[key('challenge-results')] = true;
+      try {
+        const results = await getPendingChallengeResults();
+        const channelId = process.env.SALES_CHANNEL_ID;
+        if (results.length && channelId) {
+          const ch = await client.channels.fetch(channelId);
+          for (const result of results) {
+            if (result.tie) {
+              await ch.send([
+                ``,
+                `⚔️🤝 CHALLENGE RESULT — IT'S A TIE! 🤝⚔️`,
+                ``,
+                `<@${result.winner.id}> vs <@${result.loser.id}> — both finished with **${formatMoney(result.winner.total)}** AP!`,
+                ``,
+                `Dead even. Both of you went to WAR yesterday — respect. 💪`,
+                `Rematch? Run it back. 🔥`,
+                ``,
+              ].join('\n'));
+            } else {
+              await ch.send([
+                ``,
+                `⚔️🏆 CHALLENGE RESULT IS IN! 🏆⚔️`,
+                ``,
+                `Yesterday's battle has been decided...`,
+                ``,
+                `👑 WINNER: <@${result.winner.id}> — **${formatMoney(result.winner.total)}** AP`,
+                `😤 Runner Up: <@${result.loser.id}> — **${formatMoney(result.loser.total)}** AP`,
+                ``,
+                `That's what it looks like when you CLOSE under pressure. Bow out or run it back! 🔥`,
+                ``,
+              ].join('\n'));
+            }
+          }
+          await clearPendingChallengeResults();
+        }
+      } catch (err) { console.error('Challenge results post error:', err.message); }
     }
 
     // Sale anniversaries - check every day at 9:05am

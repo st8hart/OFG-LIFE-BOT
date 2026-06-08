@@ -367,6 +367,43 @@ async function expireChallenges() {
   await supabase.from('challenges').update({ status: 'expired' }).eq('status', 'active');
 }
 
+// Call at 11:55pm — grabs daily totals BEFORE midnight reset, stores winner for morning announcement
+async function determineChallengeWinners() {
+  const { data, error } = await supabase.from('challenges').select('*').eq('status', 'active');
+  if (error || !data || !data.length) return;
+
+  const results = [];
+  for (const challenge of data) {
+    const challengerTotal = await getUserDailyTotal(challenge.challenger_id);
+    const challengeeTotal = await getUserDailyTotal(challenge.challengee_id);
+    if (challengerTotal === 0 && challengeeTotal === 0) continue; // nobody sold, skip
+
+    const tie = challengerTotal === challengeeTotal;
+    const winner = challengerTotal >= challengeeTotal
+      ? { id: challenge.challenger_id, name: challenge.challenger_name, total: challengerTotal }
+      : { id: challenge.challengee_id, name: challenge.challengee_name, total: challengeeTotal };
+    const loser = challengerTotal >= challengeeTotal
+      ? { id: challenge.challengee_id, name: challenge.challengee_name, total: challengeeTotal }
+      : { id: challenge.challenger_id, name: challenge.challenger_name, total: challengerTotal };
+
+    results.push({ winner, loser, tie });
+  }
+
+  if (results.length) {
+    await supabase.from('settings').upsert({ key: 'pending_challenge_results', value: JSON.stringify(results) });
+  }
+}
+
+async function getPendingChallengeResults() {
+  const { data, error } = await supabase.from('settings').select('value').eq('key', 'pending_challenge_results').single();
+  if (error || !data) return [];
+  try { return JSON.parse(data.value); } catch { return []; }
+}
+
+async function clearPendingChallengeResults() {
+  await supabase.from('settings').delete().eq('key', 'pending_challenge_results');
+}
+
 // ── Anniversaries ─────────────────────────────────────────────────────────────
 
 async function getFirstSaleDate(userId) {
@@ -430,6 +467,7 @@ async function getWeeklyMVP(prevWeek = false) {
 module.exports = {
   addSale, getLeaderboard, getMonthlyTotal, getUserStats, getTeamStats,
   createChallenge, getActiveChallenge, expireChallenges,
+  determineChallengeWinners, getPendingChallengeResults, clearPendingChallengeResults,
   getAllAgentFirstSales, getMonthlyChampion, getWeeklyMVP,
   getAllTimeRecords, setAllTimeRecord, getMonthlyRecords,
   getUserDailyTotal, getUserWeeklyTotal,
