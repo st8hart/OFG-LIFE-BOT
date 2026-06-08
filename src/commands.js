@@ -100,14 +100,25 @@ const teamStatsCommand = {
 const recentSalesCommand = {
   data: new SlashCommandBuilder().setName('recentsales').setDescription('View the 5 most recent sales'),
   async execute(interaction) {
-    const sales = await getRecentSales(5);
+    const sales = await getRecentSales(30);
     if (sales.length === 0) return interaction.reply({ content: 'No sales logged yet!', ephemeral: true });
     let desc = '';
     sales.forEach((s, i) => {
       const date = new Date(s.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       desc += `**${i + 1}.** <@${s.user_id}> - ${formatMoney(s.premium)} - ${s.policy_type} - ${date} (ID: ${s.id})\n`;
     });
-    await interaction.reply({ embeds: [{ color: 0x3498DB, title: 'Recent Sales', description: desc, footer: { text: 'OFG - Production Tracker' } }] });
+    // Split into chunks if too long for Discord
+    const chunks = [];
+    let current = '';
+    for (const line of desc.split('\n')) {
+      if ((current + line).length > 1900) { chunks.push(current); current = line + '\n'; }
+      else current += line + '\n';
+    }
+    if (current) chunks.push(current);
+    await interaction.reply({ embeds: [{ color: 0x3498DB, title: `Recent Sales (Last ${sales.length})`, description: chunks[0], footer: { text: 'OFG - Production Tracker' } }] });
+    for (let i = 1; i < chunks.length; i++) {
+      await interaction.followUp({ embeds: [{ color: 0x3498DB, description: chunks[i] }] });
+    }
   },
 };
 
