@@ -3,7 +3,7 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, Events, Collection } = require('discord.js');
 const {
   addSale, getUserStats, getRankForAmount, getMonthlyTotal, getGoal, setGoal,
-  getUserTotalSales, getDailySalesCount, getMonthlyTopSale,
+  getUserTotalSales, getDailySalesCount, getTeamDailySalesCount, getMonthlyTopSale,
   getActiveChallenge, expireChallenges,
   determineChallengeWinners, getPendingChallengeResults, clearPendingChallengeResults, getAllAgentFirstSales,
   getMonthlyChampion, getWeeklyMVP,
@@ -77,9 +77,9 @@ async function handleSaleModal(interaction) {
   const totalSalesBefore = await getUserTotalSales(interaction.user.id);
   const isFirstEver = totalSalesBefore === 0;
 
-  // Check if this is first sale of the day for anyone
-  const dailyCountBefore = await getDailySalesCount(interaction.user.id);
-  const isFirstOfDay = dailyCountBefore === 0;
+  // Check if this is first sale of the day for ANYONE on the team
+  const teamDailyCountBefore = await getTeamDailySalesCount();
+  const isFirstOfDay = teamDailyCountBefore === 0;
 
   // Get current monthly top sale before adding
   const prevTopSale = await getMonthlyTopSale();

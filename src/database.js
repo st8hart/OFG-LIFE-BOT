@@ -150,6 +150,14 @@ async function getDailySalesCount(userId) {
   return data.length;
 }
 
+// Returns total sales count across the ENTIRE team today — used for First Blood check
+async function getTeamDailySalesCount() {
+  const start = new Date(); start.setHours(0,0,0,0);
+  const { data, error } = await supabase.from('sales').select('id').gte('created_at', start.toISOString());
+  if (error) throw error;
+  return data.length;
+}
+
 async function getMonthlyTopSale() {
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -473,7 +481,7 @@ module.exports = {
   getUserDailyTotal, getUserWeeklyTotal,
   setPersonalGoal, getPersonalGoal, getAllPersonalGoals,
   editSale, getSaleById,
-  getUserTotalSales, getDailySalesCount, getMonthlyTopSale,
+  getUserTotalSales, getDailySalesCount, getTeamDailySalesCount, getMonthlyTopSale,
   getRecentSales, deleteSale, adminDeleteSale, getGoal, setGoal,
   getRanks, getRankForAmount,
 };
