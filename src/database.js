@@ -196,6 +196,83 @@ function getRankForAmount(amount) {
   return current;
 }
 
+// ── Records ──────────────────────────────────────────────────────────────────
+
+async function getAllTimeRecords() {
+  const { data, error } = await supabase.from('settings')
+    .select('key, value')
+    .in('key', ['alltime_day_amount', 'alltime_day_user', 'alltime_day_username',
+                 'alltime_week_amount', 'alltime_week_user', 'alltime_week_username',
+                 'alltime_month_amount', 'alltime_month_user', 'alltime_month_username']);
+  if (error) return {};
+  const result = {};
+  for (const row of data) result[row.key] = row.value;
+  return result;
+}
+
+async function setAllTimeRecord(type, amount, userId, username) {
+  const updates = [
+    { key: `alltime_${type}_amount`, value: String(amount) },
+    { key: `alltime_${type}_user`, value: userId },
+    { key: `alltime_${type}_username`, value: username },
+  ];
+  for (const u of updates) {
+    await supabase.from('settings').upsert(u);
+  }
+}
+
+async function getMonthlyRecords() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const { data, error } = await supabase.from('sales')
+    .select('user_id, username, premium, created_at')
+    .gte('created_at', start.toISOString());
+  if (error || !data.length) return { bestDay: null, bestWeek: null };
+
+  // Best day of month
+  const byUserDay = {};
+  for (const s of data) {
+    const d = new Date(s.created_at).toDateString();
+    const key = `${s.user_id}-${d}`;
+    if (!byUserDay[key]) byUserDay[key] = { user_id: s.user_id, username: s.username, total: 0, date: d };
+    byUserDay[key].total += parseFloat(s.premium);
+  }
+  const bestDay = Object.values(byUserDay).sort((a, b) => b.total - a.total)[0] || null;
+
+  // Best week of month
+  const byUserWeek = {};
+  for (const s of data) {
+    const d = new Date(s.created_at);
+    const weekNum = Math.floor(d.getDate() / 7);
+    const key = `${s.user_id}-W${weekNum}`;
+    if (!byUserWeek[key]) byUserWeek[key] = { user_id: s.user_id, username: s.username, total: 0 };
+    byUserWeek[key].total += parseFloat(s.premium);
+  }
+  const bestWeek = Object.values(byUserWeek).sort((a, b) => b.total - a.total)[0] || null;
+
+  return { bestDay, bestWeek };
+}
+
+async function getUserDailyTotal(userId) {
+  const start = new Date(); start.setHours(0,0,0,0);
+  const { data, error } = await supabase.from('sales')
+    .select('premium')
+    .eq('user_id', userId)
+    .gte('created_at', start.toISOString());
+  if (error) return 0;
+  return data.reduce((sum, s) => sum + parseFloat(s.premium), 0);
+}
+
+async function getUserWeeklyTotal(userId) {
+  const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const { data, error } = await supabase.from('sales')
+    .select('premium')
+    .eq('user_id', userId)
+    .gte('created_at', start.toISOString());
+  if (error) return 0;
+  return data.reduce((sum, s) => sum + parseFloat(s.premium), 0);
+}
+
 // ── Challenges ───────────────────────────────────────────────────────────────
 
 async function createChallenge(challengerId, challengerName, challengeeId, challengeeName) {
@@ -285,6 +362,8 @@ module.exports = {
   addSale, getLeaderboard, getMonthlyTotal, getUserStats, getTeamStats,
   createChallenge, getActiveChallenge, expireChallenges,
   getAllAgentFirstSales, getMonthlyChampion, getWeeklyMVP,
+  getAllTimeRecords, setAllTimeRecord, getMonthlyRecords,
+  getUserDailyTotal, getUserWeeklyTotal,
   getUserTotalSales, getDailySalesCount, getMonthlyTopSale,
   getRecentSales, deleteSale, adminDeleteSale, getGoal, setGoal,
   getRanks, getRankForAmount,

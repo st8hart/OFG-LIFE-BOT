@@ -6,6 +6,8 @@ const {
   getUserTotalSales, getDailySalesCount, getMonthlyTopSale,
   getActiveChallenge, expireChallenges, getAllAgentFirstSales,
   getMonthlyChampion, getWeeklyMVP,
+  getAllTimeRecords, setAllTimeRecord, getMonthlyRecords,
+  getUserDailyTotal, getUserWeeklyTotal,
 } = require('./database');
 const { buildLeaderboardEmbed, formatMoney } = require('./leaderboard');
 const {
@@ -167,23 +169,90 @@ async function handleSaleModal(interaction) {
         ].join('\n'));
       }
 
-      // New monthly record
-      if (prevTopSale && premium > parseFloat(prevTopSale.premium) && prevTopSale.user_id !== interaction.user.id) {
+      // Biggest single sale of the month
+      if (!prevTopSale || premium > parseFloat(prevTopSale.premium)) {
         await channel.send([
           ``,
-          `💥 NEW MONTHLY RECORD! 💥`,
+          `💥 BIGGEST MONTHLY SALE! 💥`,
           ``,
-          `<@${interaction.user.id}> just set a new biggest sale of the month with ${formatMoney(premium)} AP!`,
-          `Record broken! 🏆`,
+          `<@${interaction.user.id}> just set the record for the biggest sale of the month with ${formatMoney(premium)} AP!`,
+          `Can anyone top it before the month ends? 🔥`,
           ``,
         ].join('\n'));
-      } else if (!prevTopSale) {
-        // First sale of the month
+      }
+
+      // Check daily total record for this month
+      const myDailyTotal = await getUserDailyTotal(interaction.user.id);
+      const { bestDay: monthBestDay, bestWeek: monthBestWeek } = await getMonthlyRecords();
+      if (!monthBestDay || myDailyTotal > monthBestDay.total) {
         await channel.send([
           ``,
-          `💥 NEW MONTHLY RECORD! 💥`,
+          `🏅 BIGGEST SALES DAY THIS MONTH! 🏅`,
           ``,
-          `<@${interaction.user.id}> just set the first record of the month with ${formatMoney(premium)} AP!`,
+          `<@${interaction.user.id}> just had the biggest sales day of the month with ${formatMoney(myDailyTotal)} AP today!`,
+          `That is the day to beat! 🔥`,
+          ``,
+        ].join('\n'));
+      }
+
+      // Check weekly total record for this month
+      const myWeeklyTotal = await getUserWeeklyTotal(interaction.user.id);
+      if (!monthBestWeek || myWeeklyTotal > monthBestWeek.total) {
+        await channel.send([
+          ``,
+          `🏅 BIGGEST SALES WEEK THIS MONTH! 🏅`,
+          ``,
+          `<@${interaction.user.id}> just had the biggest sales week of the month with ${formatMoney(myWeeklyTotal)} AP this week!`,
+          `The weekly bar has been raised! 💪🔥`,
+          ``,
+        ].join('\n'));
+      }
+
+      // All time records check
+      const records = await getAllTimeRecords();
+
+      // All time biggest day
+      if (myDailyTotal > parseFloat(records.alltime_day_amount || 0)) {
+        const prev = records.alltime_day_username ? `Previous record: ${formatMoney(records.alltime_day_amount)} by ${records.alltime_day_username}` : 'First all time record set!';
+        await setAllTimeRecord('day', myDailyTotal, interaction.user.id, displayName);
+        await channel.send([
+          ``,
+          `🌟 ALL TIME DAILY RECORD BROKEN! 🌟`,
+          ``,
+          `<@${interaction.user.id}> just had the BIGGEST SALES DAY in OFG history with ${formatMoney(myDailyTotal)} AP in a single day!`,
+          `That is an OFG LEGEND performance! 🏆🔥`,
+          prev,
+          ``,
+        ].join('\n'));
+      }
+
+      // All time biggest week
+      if (myWeeklyTotal > parseFloat(records.alltime_week_amount || 0)) {
+        const prev = records.alltime_week_username ? `Previous record: ${formatMoney(records.alltime_week_amount)} by ${records.alltime_week_username}` : 'First all time record set!';
+        await setAllTimeRecord('week', myWeeklyTotal, interaction.user.id, displayName);
+        await channel.send([
+          ``,
+          `🌟 ALL TIME WEEKLY RECORD BROKEN! 🌟`,
+          ``,
+          `<@${interaction.user.id}> just had the BIGGEST SALES WEEK in OFG history with ${formatMoney(myWeeklyTotal)} AP this week!`,
+          `Absolutely UNSTOPPABLE! 🏆🔥`,
+          prev,
+          ``,
+        ].join('\n'));
+      }
+
+      // All time biggest month
+      const myMonthlyTotal = stats?.monthly_total || 0;
+      if (myMonthlyTotal > parseFloat(records.alltime_month_amount || 0)) {
+        const prev = records.alltime_month_username ? `Previous record: ${formatMoney(records.alltime_month_amount)} by ${records.alltime_month_username}` : 'First all time record set!';
+        await setAllTimeRecord('month', myMonthlyTotal, interaction.user.id, displayName);
+        await channel.send([
+          ``,
+          `🌟 ALL TIME MONTHLY RECORD BROKEN! 🌟`,
+          ``,
+          `<@${interaction.user.id}> just had the BIGGEST SALES MONTH in OFG history with ${formatMoney(myMonthlyTotal)} AP!`,
+          `This is what LEGEND status looks like at OFG! 👑🏆🔥`,
+          prev,
           ``,
         ].join('\n'));
       }
