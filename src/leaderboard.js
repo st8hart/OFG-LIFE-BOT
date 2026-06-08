@@ -24,8 +24,8 @@ async function getPeriodTotal(period, rows) {
   return rows.reduce((sum, r) => sum + r.total, 0);
 }
 
-async function buildLeaderboardEmbed(period) {
-  const rows = await getLeaderboard(period);
+async function buildLeaderboardEmbed(period, prevWeek = false) {
+  const rows = await getLeaderboard(period, prevWeek);
   const monthlyTotal = await getMonthlyTotal();
   const currentGoal = await getGoal();
   const periodTotal = rows.reduce((sum, r) => sum + r.total, 0);
@@ -35,7 +35,7 @@ async function buildLeaderboardEmbed(period) {
 
   let title = '';
   if (period === 'daily')   title = `📅 OFG TODAY'S LEADERBOARD`;
-  if (period === 'weekly')  title = `📆 OFG THIS WEEK'S LEADERBOARD`;
+  if (period === 'weekly')  title = prevWeek ? `📆 OFG LAST WEEK'S LEADERBOARD` : `📆 OFG THIS WEEK'S LEADERBOARD`;
   if (period === 'monthly') title = `🏆 OFG ${monthName} ${year} LEADERBOARD`;
 
   const color = PERIOD_COLORS[period] || 0xF1C40F;
@@ -43,7 +43,6 @@ async function buildLeaderboardEmbed(period) {
 
   // Period summary block
   if (period === 'daily') {
-    const dayBar = buildProgressBar(periodTotal, currentGoal);
     embed.addFields({
       name: '📅 Today at a Glance',
       value: [
@@ -57,7 +56,7 @@ async function buildLeaderboardEmbed(period) {
     });
   } else if (period === 'weekly') {
     embed.addFields({
-      name: '📆 This Week at a Glance',
+      name: prevWeek ? '📆 Last Week at a Glance' : '📆 This Week at a Glance',
       value: [
         `**Weekly Total: ${formatMoney(periodTotal)}**`,
         ``,

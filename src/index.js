@@ -335,12 +335,12 @@ function scheduleLeaderboards(client) {
     } catch (err) { console.error('Leaderboard error:', err.message); }
   };
 
-  const postFinalLeaderboard = async (period, intro) => {
+  const postFinalLeaderboard = async (period, intro, prevWeek = false) => {
     const channelId = process.env.LEADERBOARD_CHANNEL_ID;
     if (!channelId) return;
     try {
       const channel = await client.channels.fetch(channelId);
-      const embed = await buildLeaderboardEmbed(period);
+      const embed = await buildLeaderboardEmbed(period, prevWeek);
       embed.setColor(0xFFD700);
       await channel.send({ content: intro, embeds: [embed] });
     } catch (err) { console.error('Final leaderboard error:', err.message); }
@@ -365,7 +365,7 @@ function scheduleLeaderboards(client) {
     if (day === 1 && hour === 8 && min === 5 && !lastPosted[key('mvp')]) {
       lastPosted[key('mvp')] = true;
       try {
-        const mvp = await getWeeklyMVP();
+        const mvp = await getWeeklyMVP(true); // true = look at last week, not this new week
         const channelId = process.env.SALES_CHANNEL_ID;
         if (mvp && channelId) {
           const ch = await client.channels.fetch(channelId);
@@ -452,14 +452,17 @@ function scheduleLeaderboards(client) {
       } catch (err) { console.error('Anniversary error:', err.message); }
     }
 
-    // Final Daily at 8am
-    if (hour === 8 && min === 0 && !lastPosted[key('final-daily')]) {
+    // Final Daily at 8am — skip Monday (too hectic with weekly announcements)
+    if (hour === 8 && min === 0 && day !== 1 && !lastPosted[key('final-daily')]) {
       lastPosted[key('final-daily')] = true;
       postFinalLeaderboard('daily', [
         ``,
-        `A new day is here - lets celebrate yesterday grinders!`,
-        `Every call made, every door knocked, every policy written - it all counts.`,
-        `Here is how the team finished yesterday. Salute to everyone who put in the work!`,
+        `🌅🔥 YESTERDAY'S RESULTS ARE IN! 🔥🌅`,
+        ``,
+        `While others were sleeping, OFG was CLOSING. 😤💰`,
+        `Every call picked up, every objection crushed, every policy written — it all COUNTS.`,
+        ``,
+        `⬇️ Here's how the team FINISHED yesterday. Salute to everyone who put in work! 🫡`,
         ``,
       ].join('\n'));
     }
@@ -476,17 +479,21 @@ function scheduleLeaderboards(client) {
       postLeaderboard('monthly');
     }
 
-    // Final Weekly Monday 8am
+    // Final Weekly Monday 8am — uses prevWeek=true so it shows last week, not this new week
     if (day === 1 && hour === 8 && min === 0 && !lastPosted[key('final-weekly')]) {
       lastPosted[key('final-weekly')] = true;
       postFinalLeaderboard('weekly', [
         ``,
-        `The week is officially in the books!`,
-        `Another week of grinding, closing, and building toward something great.`,
-        `These are the final standings - shoutout to everyone who showed up and showed out!`,
-        `The top of this board earned it. Lets go even harder next week!`,
+        `🚨🏁 THE WEEK HAS BEEN DECIDED! 🏁🚨`,
         ``,
-      ].join('\n'));
+        `Seven days of calls, closes, and zero excuses — and THIS board shows exactly who showed up! 💪🔥`,
+        ``,
+        `👑 FINAL WEEKLY STANDINGS — officially LOCKED IN. 👑`,
+        ``,
+        `Bow to the top of this board. Every dollar on it was EARNED. 🫡🏆`,
+        `Now shake it off, reload, and come back HUNGRY. The board resets — the grind NEVER does. 💥`,
+        ``,
+      ].join('\n'), true);
     }
 
     // New month personal goal reminder - 1st of month at 7am

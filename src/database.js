@@ -6,6 +6,17 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
+// ── Week boundary helper (Mon–Sun, Central Time) ──────────────────────────────
+// prevWeek=true returns last Monday midnight (for Monday recap posts)
+function getWeekStart(prevWeek = false) {
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+  const day = now.getDay(); // 0=Sun, 1=Mon ... 6=Sat
+  const daysFromMonday = day === 0 ? 6 : day - 1;
+  now.setDate(now.getDate() - daysFromMonday - (prevWeek ? 7 : 0));
+  now.setHours(0, 0, 0, 0);
+  return now;
+}
+
 // ── Sales ─────────────────────────────────────────────────────────────────────
 
 async function addSale({ userId, username, clientName, policyType, premium, carrier, notes }) {
@@ -17,15 +28,19 @@ async function addSale({ userId, username, clientName, policyType, premium, carr
   return data;
 }
 
-async function getLeaderboard(period) {
+async function getLeaderboard(period, prevWeek = false) {
   let query = supabase.from('sales').select('user_id, username, premium');
   const now = new Date();
   if (period === 'daily') {
     const start = new Date(now); start.setHours(0,0,0,0);
     query = query.gte('created_at', start.toISOString());
   } else if (period === 'weekly') {
-    const start = new Date(now - 7 * 24 * 60 * 60 * 1000);
+    const start = getWeekStart(prevWeek);
     query = query.gte('created_at', start.toISOString());
+    if (prevWeek) {
+      // cap at this Monday midnight so current week sales don't bleed in
+      query = query.lt('created_at', getWeekStart(false).toISOString());
+    }
   } else if (period === 'monthly') {
     const start = new Date(now.getFullYear(), now.getMonth(), 1);
     query = query.gte('created_at', start.toISOString());
@@ -52,7 +67,7 @@ async function getMonthlyTotal() {
 async function getUserStats(userId) {
   const now = new Date();
   const todayStart = new Date(now); todayStart.setHours(0,0,0,0);
-  const weekStart = new Date(now - 7 * 24 * 60 * 60 * 1000);
+  const weekStart = getWeekStart();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const { data, error } = await supabase.from('sales').select('premium, created_at').eq('user_id', userId);
   if (error) throw error;
@@ -314,7 +329,7 @@ async function getUserDailyTotal(userId) {
 }
 
 async function getUserWeeklyTotal(userId) {
-  const start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const start = getWeekStart();
   const { data, error } = await supabase.from('sales')
     .select('premium')
     .eq('user_id', userId)
@@ -393,11 +408,15 @@ async function getMonthlyChampion() {
   return Object.values(map).sort((a, b) => b.total - a.total)[0];
 }
 
-async function getWeeklyMVP() {
-  const weekStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const { data, error } = await supabase.from('sales')
+async function getWeeklyMVP(prevWeek = false) {
+  const weekStart = getWeekStart(prevWeek);
+  let query = supabase.from('sales')
     .select('user_id, username, premium')
     .gte('created_at', weekStart.toISOString());
+  if (prevWeek) {
+    query = query.lt('created_at', getWeekStart(false).toISOString());
+  }
+  const { data, error } = await query;
   if (error || !data.length) return null;
   const map = {};
   for (const s of data) {
