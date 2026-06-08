@@ -193,3 +193,178 @@ const challengeCommand = {
 };
 
 module.exports.challengeCommand = challengeCommand;
+
+// ── /mypersonalgoal ───────────────────────────────────────────────────────────
+const { setPersonalGoal, getPersonalGoal, getAllPersonalGoals, getUserStats: getStats } = require('./database');
+
+const myPersonalGoalCommand = {
+  data: new SlashCommandBuilder()
+    .setName('mypersonalgoal')
+    .setDescription('Set your personal monthly AP goal (only you can see your progress)')
+    .addIntegerOption(opt =>
+      opt.setName('amount')
+        .setDescription('Your personal goal in dollars e.g. 15000')
+        .setRequired(true)
+    ),
+  async execute(interaction) {
+    const amount = interaction.options.getInteger('amount');
+    const displayName = interaction.user.displayName || interaction.user.username;
+    await setPersonalGoal(interaction.user.id, displayName, amount);
+
+    const stats = await getStats(interaction.user.id);
+    const current = stats?.monthly_total || 0;
+    const pct = Math.min(Math.round((current / amount) * 100), 100);
+    const filled = Math.round((pct / 100) * 20);
+    const bar = '`' + '█'.repeat(filled) + '░'.repeat(20 - filled) + '`';
+    const remaining = Math.max(0, amount - current);
+
+    await interaction.reply({
+      content: [
+        ``,
+        `🎯 Personal goal set to **$${amount.toLocaleString()}** for this month!`,
+        ``,
+        `Current: **$${current.toLocaleString()}** / **$${amount.toLocaleString()}**`,
+        `${bar} ${pct}%`,
+        remaining > 0 ? `**$${remaining.toLocaleString()}** to go — keep pushing! 💪` : `You already hit your personal goal! Set a higher one! 🔥`,
+        ``,
+        `Only you can see this message.`,
+      ].join('\n'),
+      ephemeral: true,
+    });
+  },
+};
+
+// ── /teamgoals ────────────────────────────────────────────────────────────────
+const teamGoalsCommand = {
+  data: new SlashCommandBuilder()
+    .setName('teamgoals')
+    .setDescription('See everyone on the team and their personal monthly goals'),
+  async execute(interaction) {
+    await interaction.deferReply();
+
+    const goals = await getAllPersonalGoals();
+
+    if (goals.length === 0) {
+      return interaction.editReply({ content: 'No agents have set personal goals yet! Use `/mypersonalgoal` to set yours.' });
+    }
+
+    const { formatMoney } = require('./leaderboard');
+    const { getRankForAmount } = require('./database');
+
+    let desc = '';
+    for (const goal of goals) {
+      const stats = await getStats(goal.user_id);
+      const current = stats?.monthly_total || 0;
+      const pct = Math.min(Math.round((current / goal.amount) * 100), 100);
+      const filled = Math.round((pct / 100) * 10);
+      const bar = '█'.repeat(filled) + '░'.repeat(10 - filled);
+      const rank = getRankForAmount(current);
+      const hit = current >= goal.amount ? ' ✅' : '';
+      desc += `${rank.emoji} <@${goal.user_id}> — Goal: **${formatMoney(goal.amount)}** | At: **${formatMoney(current)}** | \`${bar}\` ${pct}%${hit}\n`;
+    }
+
+    const embed = {
+      color: 0xF1C40F,
+      title: '🎯 Team Personal Goals',
+      description: desc,
+      footer: { text: 'OFG - Production Tracker' },
+      timestamp: new Date().toISOString(),
+    };
+
+    await interaction.editReply({ embeds: [embed] });
+  },
+};
+
+module.exports.myPersonalGoalCommand = myPersonalGoalCommand;
+module.exports.teamGoalsCommand = teamGoalsCommand;
+
+// ── /editsale (admin only) ────────────────────────────────────────────────────
+const { editSale, getSaleById } = require('./database');
+
+const editSaleCommand = {
+  data: new SlashCommandBuilder()
+    .setName('editsale')
+    .setDescription('Admin: Edit the AP amount of any sale by ID')
+    .addIntegerOption(opt =>
+      opt.setName('id')
+        .setDescription('Sale ID (use /recentsales to find it)')
+        .setRequired(true)
+    )
+    .addIntegerOption(opt =>
+      opt.setName('amount')
+        .setDescription('New AP amount in dollars e.g. 2500')
+        .setRequired(true)
+    ),
+  async execute(interaction) {
+    if (!interaction.member.permissions.has('ManageGuild')) {
+      return interaction.reply({ content: 'You need Admin permissions to edit sales.', ephemeral: true });
+    }
+
+    const saleId = interaction.options.getInteger('id');
+    const newAmount = interaction.options.getInteger('amount');
+
+    const existing = await getSaleById(saleId);
+    if (!existing) {
+      return interaction.reply({ content: `Sale #${saleId} not found.`, ephemeral: true });
+    }
+
+    const { formatMoney } = require('./leaderboard');
+    await editSale(saleId, newAmount);
+
+    await interaction.reply({
+      content: [
+        `Sale #${saleId} updated!`,
+        `Agent: <@${existing.user_id}>`,
+        `Old amount: ${formatMoney(existing.premium)}`,
+        `New amount: ${formatMoney(newAmount)}`,
+      ].join('\n'),
+      ephemeral: true,
+    });
+  },
+};
+
+module.exports.editSaleCommand = editSaleCommand;
+
+// ── /myeditsale (own sales only) ──────────────────────────────────────────────
+const myEditSaleCommand = {
+  data: new SlashCommandBuilder()
+    .setName('myeditsale')
+    .setDescription('Edit the AP amount of your own sale by ID')
+    .addIntegerOption(opt =>
+      opt.setName('id')
+        .setDescription('Sale ID (use /recentsales to find it)')
+        .setRequired(true)
+    )
+    .addIntegerOption(opt =>
+      opt.setName('amount')
+        .setDescription('Correct AP amount in dollars e.g. 2500')
+        .setRequired(true)
+    ),
+  async execute(interaction) {
+    const saleId = interaction.options.getInteger('id');
+    const newAmount = interaction.options.getInteger('amount');
+
+    const existing = await getSaleById(saleId);
+    if (!existing) {
+      return interaction.reply({ content: `Sale #${saleId} not found.`, ephemeral: true });
+    }
+
+    if (existing.user_id !== interaction.user.id) {
+      return interaction.reply({ content: `You can only edit your own sales.`, ephemeral: true });
+    }
+
+    const { formatMoney } = require('./leaderboard');
+    await editSale(saleId, newAmount);
+
+    await interaction.reply({
+      content: [
+        `Sale #${saleId} updated!`,
+        `Old amount: ${formatMoney(existing.premium)}`,
+        `New amount: ${formatMoney(newAmount)}`,
+      ].join('\n'),
+      ephemeral: true,
+    });
+  },
+};
+
+module.exports.myEditSaleCommand = myEditSaleCommand;

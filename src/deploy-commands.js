@@ -4,12 +4,20 @@ const {
   saleCommand, leaderboardCommand, myStatsCommand, teamStatsCommand,
   recentSalesCommand, deleteSaleCommand, removeSaleCommand, setGoalCommand,
   challengeCommand,
+  myPersonalGoalCommand,
+  teamGoalsCommand,
+  editSaleCommand,
+  myEditSaleCommand,
 } = require('./commands');
 
 const commands = [
   saleCommand, leaderboardCommand, myStatsCommand, teamStatsCommand,
   recentSalesCommand, deleteSaleCommand, removeSaleCommand, setGoalCommand,
   challengeCommand,
+  myPersonalGoalCommand,
+  teamGoalsCommand,
+  editSaleCommand,
+  myEditSaleCommand,
 ].map(cmd => cmd.data.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);

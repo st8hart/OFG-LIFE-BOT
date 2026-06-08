@@ -14,6 +14,10 @@ const {
   saleCommand, leaderboardCommand, myStatsCommand, teamStatsCommand,
   recentSalesCommand, deleteSaleCommand, removeSaleCommand, setGoalCommand,
   challengeCommand,
+  myPersonalGoalCommand,
+  teamGoalsCommand,
+  editSaleCommand,
+  myEditSaleCommand,
 } = require('./commands');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -23,6 +27,10 @@ const commands = [
   saleCommand, leaderboardCommand, myStatsCommand, teamStatsCommand,
   recentSalesCommand, deleteSaleCommand, removeSaleCommand, setGoalCommand,
   challengeCommand,
+  myPersonalGoalCommand,
+  teamGoalsCommand,
+  editSaleCommand,
+  myEditSaleCommand,
 ];
 for (const cmd of commands) client.commands.set(cmd.data.name, cmd);
 
@@ -479,6 +487,42 @@ function scheduleLeaderboards(client) {
         `The top of this board earned it. Lets go even harder next week!`,
         ``,
       ].join('\n'));
+    }
+
+    // New month personal goal reminder - 1st of month at 7am
+    if (now.getDate() === 1 && hour === 7 && min === 0 && !lastPosted[key('new-month-goals')]) {
+      lastPosted[key('new-month-goals')] = true;
+      try {
+        const salesChannelId = process.env.SALES_CHANNEL_ID;
+        if (salesChannelId) {
+          const ch = await client.channels.fetch(salesChannelId);
+          const monthName = now.toLocaleString('en-US', { month: 'long' }).toUpperCase();
+          await ch.send([
+            ``,
+            `🎉🎊 WELCOME TO ${monthName}! 🎊🎉`,
+            ``,
+            `A brand new month means a brand new opportunity to level up!`,
+            `Last month is in the books — this month we go BIGGER. 🚀`,
+            ``,
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+            `🎯 **SET YOUR PERSONAL GOAL FOR ${monthName}!**`,
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+            ``,
+            `Every agent needs to set their personal production goal for the month.`,
+            `Type the command below and enter your target AP:`,
+            ``,
+            `👉 \`/mypersonalgoal\``,
+            ``,
+            `Your goal is private — only YOU can see your personal progress.`,
+            `But the team can see everyone is locked in and ready to go! 💪`,
+            ``,
+            `The team monthly goal is **$${(await getGoal()).toLocaleString()}** — lets CRUSH it together! 🔥`,
+            ``,
+            `New month. Fresh start. No excuses. Lets GET IT! 👑`,
+            ``,
+          ].join('\n'));
+        }
+      } catch (err) { console.error('New month goal reminder error:', err.message); }
     }
 
     // Final Monthly on 1st at 8am

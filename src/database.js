@@ -196,6 +196,56 @@ function getRankForAmount(amount) {
   return current;
 }
 
+// ── Edit Sale ────────────────────────────────────────────────────────────────
+
+async function editSale(saleId, newPremium) {
+  const { data, error } = await supabase.from('sales')
+    .update({ premium: newPremium })
+    .eq('id', saleId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function getSaleById(saleId) {
+  const { data, error } = await supabase.from('sales')
+    .select('*')
+    .eq('id', saleId)
+    .single();
+  if (error) return null;
+  return data;
+}
+
+// ── Personal Goals ───────────────────────────────────────────────────────────
+
+async function setPersonalGoal(userId, username, amount) {
+  await supabase.from('settings').upsert({
+    key: `personal_goal_${userId}`,
+    value: JSON.stringify({ amount, username })
+  });
+}
+
+async function getPersonalGoal(userId) {
+  const { data, error } = await supabase.from('settings')
+    .select('value')
+    .eq('key', `personal_goal_${userId}`)
+    .single();
+  if (error || !data) return null;
+  return JSON.parse(data.value);
+}
+
+async function getAllPersonalGoals() {
+  const { data, error } = await supabase.from('settings')
+    .select('key, value')
+    .like('key', 'personal_goal_%');
+  if (error || !data) return [];
+  return data.map(row => ({
+    user_id: row.key.replace('personal_goal_', ''),
+    ...JSON.parse(row.value)
+  }));
+}
+
 // ── Records ──────────────────────────────────────────────────────────────────
 
 async function getAllTimeRecords() {
@@ -364,6 +414,8 @@ module.exports = {
   getAllAgentFirstSales, getMonthlyChampion, getWeeklyMVP,
   getAllTimeRecords, setAllTimeRecord, getMonthlyRecords,
   getUserDailyTotal, getUserWeeklyTotal,
+  setPersonalGoal, getPersonalGoal, getAllPersonalGoals,
+  editSale, getSaleById,
   getUserTotalSales, getDailySalesCount, getMonthlyTopSale,
   getRecentSales, deleteSale, adminDeleteSale, getGoal, setGoal,
   getRanks, getRankForAmount,
