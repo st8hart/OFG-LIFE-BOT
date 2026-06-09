@@ -198,11 +198,6 @@ const setGoalCommand = {
   },
 };
 
-module.exports = {
-  saleCommand, leaderboardCommand, myStatsCommand, teamStatsCommand,
-  recentSalesCommand, deleteSaleCommand, removeSaleCommand, setGoalCommand,
-};
-
 // ── /challenge ────────────────────────────────────────────────────────────────
 const { createChallenge, getActiveChallenge, getDailyChallengeCount, getDailyChallengeWith, getChallengeStandings } = require('./database');
 
@@ -267,7 +262,7 @@ const challengeCommand = {
   },
 };
 
-module.exports.challengeCommand = challengeCommand;
+
 
 // ── /standings ────────────────────────────────────────────────────────────────
 const MEDALS = ['🥇', '🥈', '🥉'];
@@ -311,8 +306,7 @@ const standingsCommand = {
   },
 };
 
-module.exports.standingsCommand = standingsCommand;
-module.exports.buildStandingsEmbed = buildStandingsEmbed;
+
 
 // ── /mypersonalgoal ───────────────────────────────────────────────────────────
 const { setPersonalGoal, getPersonalGoal, getAllPersonalGoals, getUserStats: getStats } = require('./database');
@@ -395,8 +389,7 @@ const teamGoalsCommand = {
   },
 };
 
-module.exports.myPersonalGoalCommand = myPersonalGoalCommand;
-module.exports.teamGoalsCommand = teamGoalsCommand;
+
 
 // ── /editsale (admin only) ────────────────────────────────────────────────────
 const { editSale, getSaleById } = require('./database');
@@ -443,7 +436,7 @@ const editSaleCommand = {
   },
 };
 
-module.exports.editSaleCommand = editSaleCommand;
+
 
 // ── /myeditsale (own sales only) ──────────────────────────────────────────────
 const myEditSaleCommand = {
@@ -487,4 +480,10 @@ const myEditSaleCommand = {
   },
 };
 
-module.exports.myEditSaleCommand = myEditSaleCommand;
+module.exports = {
+  saleCommand, leaderboardCommand, myStatsCommand, teamStatsCommand,
+  recentSalesCommand, deleteSaleCommand, removeSaleCommand, setGoalCommand,
+  challengeCommand, standingsCommand, buildStandingsEmbed,
+  myPersonalGoalCommand, teamGoalsCommand,
+  editSaleCommand, myEditSaleCommand,
+};
