@@ -6,6 +6,7 @@ const {
   getUserTotalSales, getDailySalesCount, getTeamDailySalesCount, getMonthlyTopSale,
   getActiveChallenge, expireChallenges,
   determineChallengeWinners, getPendingChallengeResults, clearPendingChallengeResults, getAllAgentFirstSales,
+  getChallengeStandings,
   getMonthlyChampion, getWeeklyMVP,
   getAllTimeRecords, setAllTimeRecord, getMonthlyRecords,
   getUserDailyTotal, getUserWeeklyTotal,
@@ -15,6 +16,8 @@ const {
   saleCommand, leaderboardCommand, myStatsCommand, teamStatsCommand,
   recentSalesCommand, deleteSaleCommand, removeSaleCommand, setGoalCommand,
   challengeCommand,
+  standingsCommand,
+  buildStandingsEmbed,
   myPersonalGoalCommand,
   teamGoalsCommand,
   editSaleCommand,
@@ -28,6 +31,7 @@ const commands = [
   saleCommand, leaderboardCommand, myStatsCommand, teamStatsCommand,
   recentSalesCommand, deleteSaleCommand, removeSaleCommand, setGoalCommand,
   challengeCommand,
+  standingsCommand,
   myPersonalGoalCommand,
   teamGoalsCommand,
   editSaleCommand,
@@ -53,7 +57,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
     return;
   }
-  if (interaction.isModalSubmit() && interaction.customId.startsWith('saleModal')) {
+  if (interaction.isModalSubmit() && interaction.customId === 'saleModal') {
     await handleSaleModal(interaction);
   }
 });
@@ -64,9 +68,7 @@ async function handleSaleModal(interaction) {
   const carrier          = interaction.fields.getTextInputValue('carrier').trim();
   const product          = interaction.fields.getTextInputValue('product').trim();
   const leadType         = interaction.fields.getTextInputValue('leadType').trim();
-  // presentationType was chosen as a dropdown before the modal opened;
-  // it was encoded in the customId as "saleModal:<value>"
-  const presentationType = interaction.customId.split(':').slice(1).join(':');
+  const presentationType = interaction.fields.getTextInputValue('presentationType').trim();
   const premiumRaw       = interaction.fields.getTextInputValue('premium').trim();
   const premium = parseFloat(premiumRaw.replace(/[$,]/g, ''));
   if (isNaN(premium) || premium <= 0) {
@@ -526,6 +528,29 @@ function scheduleLeaderboards(client) {
     if ((day === 1 || day === 3 || day === 5) && hour === 10 && min === 0 && !lastPosted[key('monthly')]) {
       lastPosted[key('monthly')] = true;
       postLeaderboard('monthly');
+    }
+
+    // ⚔️ Friday 12pm — Weekly Head to Head Standings
+    if (day === 5 && hour === 12 && min === 0 && !lastPosted[key('h2h-standings')]) {
+      lastPosted[key('h2h-standings')] = true;
+      try {
+        const channelId = process.env.SALES_CHANNEL_ID;
+        if (channelId) {
+          const ch = await client.channels.fetch(channelId);
+          const records = await getChallengeStandings();
+          await ch.send([
+            ``,
+            `🚨⚔️ OFG HEAD TO HEAD STANDINGS ⚔️🚨`,
+            ``,
+            `The battlefield report is in! Here's who has been DOMINATING the challenge board! 💪🔥`,
+            `Every W was EARNED. Every L is motivation. Who's climbing the ranks? 👀`,
+            ``,
+            `Think you can move up? Drop a \`/challenge\` and handle your business! 👊`,
+            ``,
+          ].join('\n'));
+          await ch.send({ embeds: [buildStandingsEmbed(records)] });
+        }
+      } catch (err) { console.error('H2H standings post error:', err.message); }
     }
 
     // Final Weekly Monday 8am — uses prevWeek=true so it shows last week, not this new week

@@ -6,30 +6,15 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
-// ── Central Time boundary helpers ────────────────────────────────────────────
-// Both helpers compute the real UTC offset between the server clock and
-// Central Time, then shift the midnight/week-start back into true UTC.
-// This means they work correctly whether the server runs in UTC, EST, or
-// anything else, and automatically handle CDT ↔ CST transitions.
-
-function getDayStart() {
-  const realNow     = new Date();
-  const centralFake = new Date(realNow.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
-  const offsetMs    = realNow - centralFake;   // e.g. 18 000 000 ms for CDT (UTC-5)
-  centralFake.setHours(0, 0, 0, 0);
-  return new Date(centralFake.getTime() + offsetMs);
-}
-
+// ── Week boundary helper (Mon–Sun, Central Time) ──────────────────────────────
 // prevWeek=true returns last Monday midnight (for Monday recap posts)
 function getWeekStart(prevWeek = false) {
-  const realNow     = new Date();
-  const centralFake = new Date(realNow.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
-  const offsetMs    = realNow - centralFake;
-  const day = centralFake.getDay(); // 0=Sun, 1=Mon ... 6=Sat  (in Central time)
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+  const day = now.getDay(); // 0=Sun, 1=Mon ... 6=Sat
   const daysFromMonday = day === 0 ? 6 : day - 1;
-  centralFake.setDate(centralFake.getDate() - daysFromMonday - (prevWeek ? 7 : 0));
-  centralFake.setHours(0, 0, 0, 0);
-  return new Date(centralFake.getTime() + offsetMs);
+  now.setDate(now.getDate() - daysFromMonday - (prevWeek ? 7 : 0));
+  now.setHours(0, 0, 0, 0);
+  return now;
 }
 
 // ── Sales ─────────────────────────────────────────────────────────────────────
@@ -47,7 +32,7 @@ async function getLeaderboard(period, prevWeek = false) {
   let query = supabase.from('sales').select('user_id, username, premium');
   const now = new Date();
   if (period === 'daily') {
-    const start = getDayStart();
+    const start = new Date(now); start.setHours(0,0,0,0);
     query = query.gte('created_at', start.toISOString());
   } else if (period === 'weekly') {
     const start = getWeekStart(prevWeek);
@@ -81,7 +66,7 @@ async function getMonthlyTotal() {
 
 async function getUserStats(userId) {
   const now = new Date();
-  const todayStart = getDayStart();
+  const todayStart = new Date(now); todayStart.setHours(0,0,0,0);
   const weekStart = getWeekStart();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const { data, error } = await supabase.from('sales').select('premium, created_at').eq('user_id', userId);
@@ -159,7 +144,7 @@ async function getUserTotalSales(userId) {
 }
 
 async function getDailySalesCount(userId) {
-  const start = getDayStart();
+  const start = new Date(); start.setHours(0,0,0,0);
   const { data, error } = await supabase.from('sales').select('id').eq('user_id', userId).gte('created_at', start.toISOString());
   if (error) throw error;
   return data.length;
@@ -167,10 +152,61 @@ async function getDailySalesCount(userId) {
 
 // Returns total sales count across the ENTIRE team today — used for First Blood check
 async function getTeamDailySalesCount() {
-  const start = getDayStart();
+  const start = new Date(); start.setHours(0,0,0,0);
   const { data, error } = await supabase.from('sales').select('id').gte('created_at', start.toISOString());
   if (error) throw error;
   return data.length;
+}
+
+// ── Challenge Records ─────────────────────────────────────────────────────────
+
+// How many challenges has this user ISSUED today (cap is 3)
+async function getDailyChallengeCount(userId) {
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  const { data, error } = await supabase.from('challenges')
+    .select('id').eq('challenger_id', userId).gte('created_at', start.toISOString());
+  if (error) return 0;
+  return data.length;
+}
+
+// Check if challenger has already challenged this specific person today
+async function getDailyChallengeWith(challengerId, challengeeId) {
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  const { data, error } = await supabase.from('challenges')
+    .select('id')
+    .eq('challenger_id', challengerId)
+    .eq('challengee_id', challengeeId)
+    .gte('created_at', start.toISOString());
+  if (error) return null;
+  return data[0] || null;
+}
+
+// Increment wins or losses for an agent in challenge_records
+async function updateChallengeRecord(userId, username, isWin) {
+  const { data: existing, error } = await supabase.from('challenge_records')
+    .select('*').eq('user_id', userId).single();
+  if (existing) {
+    await supabase.from('challenge_records').update({
+      username,
+      wins:   existing.wins   + (isWin ? 1 : 0),
+      losses: existing.losses + (isWin ? 0 : 1),
+      updated_at: new Date().toISOString(),
+    }).eq('user_id', userId);
+  } else {
+    await supabase.from('challenge_records').insert({
+      user_id: userId, username,
+      wins:   isWin ? 1 : 0,
+      losses: isWin ? 0 : 1,
+    });
+  }
+}
+
+// Get all-time challenge standings sorted by wins
+async function getChallengeStandings() {
+  const { data, error } = await supabase.from('challenge_records')
+    .select('*').order('wins', { ascending: false });
+  if (error) return [];
+  return data || [];
 }
 
 async function getMonthlyTopSale() {
@@ -342,7 +378,7 @@ async function getMonthlyRecords() {
 }
 
 async function getUserDailyTotal(userId) {
-  const start = getDayStart();
+  const start = new Date(); start.setHours(0,0,0,0);
   const { data, error } = await supabase.from('sales')
     .select('premium')
     .eq('user_id', userId)
@@ -410,6 +446,12 @@ async function determineChallengeWinners() {
       : { id: challenge.challenger_id, name: challenge.challenger_name, total: challengerTotal };
 
     results.push({ winner, loser, tie });
+
+    // Update all-time records — ties count as no change
+    if (!tie) {
+      await updateChallengeRecord(winner.id, winner.name, true);
+      await updateChallengeRecord(loser.id, loser.name, false);
+    }
   }
 
   if (results.length) {
@@ -490,6 +532,7 @@ async function getWeeklyMVP(prevWeek = false) {
 module.exports = {
   addSale, getLeaderboard, getMonthlyTotal, getUserStats, getTeamStats,
   createChallenge, getActiveChallenge, expireChallenges,
+  getDailyChallengeCount, getDailyChallengeWith, updateChallengeRecord, getChallengeStandings,
   determineChallengeWinners, getPendingChallengeResults, clearPendingChallengeResults,
   getAllAgentFirstSales, getMonthlyChampion, getWeeklyMVP,
   getAllTimeRecords, setAllTimeRecord, getMonthlyRecords,
