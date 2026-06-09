@@ -11,16 +11,53 @@ const {
 const { buildLeaderboardEmbed, formatMoney } = require('./leaderboard');
 
 // ── /sale ─────────────────────────────────────────────────────────────────────
+// NOTE: Discord modals only support text inputs — no dropdowns inside a modal.
+// Presentation Type is a required slash-command option (real Discord dropdown)
+// chosen BEFORE the modal opens. The selection is encoded in the modal customId
+// (e.g. "saleModal:APT") so handleSaleModal can read it on submit.
 const saleCommand = {
-  data: new SlashCommandBuilder().setName('sale').setDescription('Log a new insurance sale'),
+  data: new SlashCommandBuilder()
+    .setName('sale')
+    .setDescription('Log a new insurance sale')
+    .addStringOption(opt =>
+      opt.setName('presentation_type')
+        .setDescription('How was this policy presented?')
+        .setRequired(true)
+        .addChoices(
+          { name: 'APT',            value: 'APT' },
+          { name: 'One Call Close', value: 'One Call Close' },
+          { name: 'In Home',        value: 'In Home' },
+        )
+    ),
   async execute(interaction) {
-    const modal = new ModalBuilder().setCustomId('saleModal').setTitle('Log New Sale - OFG');
+    const presentationType = interaction.options.getString('presentation_type');
+    // Encode the selection in customId so it survives the modal round-trip
+    const modal = new ModalBuilder().setCustomId(`saleModal:${presentationType}`).setTitle('Log New Sale - OFG');
     modal.addComponents(
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('carrier').setLabel('Carrier').setStyle(TextInputStyle.Short).setPlaceholder('e.g. Mutual of Omaha, MOO').setRequired(true)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('product').setLabel('Product').setStyle(TextInputStyle.Short).setPlaceholder('e.g. IUL, Term Life, Final Expense').setRequired(true)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('leadType').setLabel('Lead Type').setStyle(TextInputStyle.Short).setPlaceholder('e.g. A Lead, B Lead, Referral').setRequired(true)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('presentationType').setLabel('Presentation Type').setStyle(TextInputStyle.Short).setPlaceholder('e.g. APT, Drop-In, Virtual').setRequired(true)),
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('premium').setLabel('Submitted AP ($)').setStyle(TextInputStyle.Short).setPlaceholder('e.g. 2844').setRequired(true)),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('carrier').setLabel('Carrier')
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder('e.g. Mutual of Omaha, MOO, Transamerica, UHL')
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('product').setLabel('Product')
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder('e.g. IUL, Term Life, Final Expense')
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('leadType').setLabel('Lead Type')
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder('e.g. A Lead, B Lead, Referral, D Lead')
+          .setRequired(true)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('premium').setLabel('Submitted AP ($)')
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder('e.g. 2844')
+          .setRequired(true)
+      ),
     );
     await interaction.showModal(modal);
   },

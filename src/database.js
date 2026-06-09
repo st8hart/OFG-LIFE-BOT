@@ -6,15 +6,30 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
-// ── Week boundary helper (Mon–Sun, Central Time) ──────────────────────────────
+// ── Central Time boundary helpers ────────────────────────────────────────────
+// Both helpers compute the real UTC offset between the server clock and
+// Central Time, then shift the midnight/week-start back into true UTC.
+// This means they work correctly whether the server runs in UTC, EST, or
+// anything else, and automatically handle CDT ↔ CST transitions.
+
+function getDayStart() {
+  const realNow     = new Date();
+  const centralFake = new Date(realNow.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+  const offsetMs    = realNow - centralFake;   // e.g. 18 000 000 ms for CDT (UTC-5)
+  centralFake.setHours(0, 0, 0, 0);
+  return new Date(centralFake.getTime() + offsetMs);
+}
+
 // prevWeek=true returns last Monday midnight (for Monday recap posts)
 function getWeekStart(prevWeek = false) {
-  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }));
-  const day = now.getDay(); // 0=Sun, 1=Mon ... 6=Sat
+  const realNow     = new Date();
+  const centralFake = new Date(realNow.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+  const offsetMs    = realNow - centralFake;
+  const day = centralFake.getDay(); // 0=Sun, 1=Mon ... 6=Sat  (in Central time)
   const daysFromMonday = day === 0 ? 6 : day - 1;
-  now.setDate(now.getDate() - daysFromMonday - (prevWeek ? 7 : 0));
-  now.setHours(0, 0, 0, 0);
-  return now;
+  centralFake.setDate(centralFake.getDate() - daysFromMonday - (prevWeek ? 7 : 0));
+  centralFake.setHours(0, 0, 0, 0);
+  return new Date(centralFake.getTime() + offsetMs);
 }
 
 // ── Sales ─────────────────────────────────────────────────────────────────────
@@ -32,7 +47,7 @@ async function getLeaderboard(period, prevWeek = false) {
   let query = supabase.from('sales').select('user_id, username, premium');
   const now = new Date();
   if (period === 'daily') {
-    const start = new Date(now); start.setHours(0,0,0,0);
+    const start = getDayStart();
     query = query.gte('created_at', start.toISOString());
   } else if (period === 'weekly') {
     const start = getWeekStart(prevWeek);
@@ -66,7 +81,7 @@ async function getMonthlyTotal() {
 
 async function getUserStats(userId) {
   const now = new Date();
-  const todayStart = new Date(now); todayStart.setHours(0,0,0,0);
+  const todayStart = getDayStart();
   const weekStart = getWeekStart();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const { data, error } = await supabase.from('sales').select('premium, created_at').eq('user_id', userId);
@@ -144,7 +159,7 @@ async function getUserTotalSales(userId) {
 }
 
 async function getDailySalesCount(userId) {
-  const start = new Date(); start.setHours(0,0,0,0);
+  const start = getDayStart();
   const { data, error } = await supabase.from('sales').select('id').eq('user_id', userId).gte('created_at', start.toISOString());
   if (error) throw error;
   return data.length;
@@ -152,7 +167,7 @@ async function getDailySalesCount(userId) {
 
 // Returns total sales count across the ENTIRE team today — used for First Blood check
 async function getTeamDailySalesCount() {
-  const start = new Date(); start.setHours(0,0,0,0);
+  const start = getDayStart();
   const { data, error } = await supabase.from('sales').select('id').gte('created_at', start.toISOString());
   if (error) throw error;
   return data.length;
@@ -327,7 +342,7 @@ async function getMonthlyRecords() {
 }
 
 async function getUserDailyTotal(userId) {
-  const start = new Date(); start.setHours(0,0,0,0);
+  const start = getDayStart();
   const { data, error } = await supabase.from('sales')
     .select('premium')
     .eq('user_id', userId)
