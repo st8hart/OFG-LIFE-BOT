@@ -57,7 +57,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
     return;
   }
-  if (interaction.isModalSubmit() && interaction.customId === 'saleModal') {
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('saleModal')) {
     await handleSaleModal(interaction);
   }
 });
@@ -68,7 +68,7 @@ async function handleSaleModal(interaction) {
   const carrier          = interaction.fields.getTextInputValue('carrier').trim();
   const product          = interaction.fields.getTextInputValue('product').trim();
   const leadType         = interaction.fields.getTextInputValue('leadType').trim();
-  const presentationType = interaction.fields.getTextInputValue('presentationType').trim();
+  const presentationType = interaction.customId.split(':')[1] || 'Unknown';
   const premiumRaw       = interaction.fields.getTextInputValue('premium').trim();
   const premium = parseFloat(premiumRaw.replace(/[$,]/g, ''));
   if (isNaN(premium) || premium <= 0) {
