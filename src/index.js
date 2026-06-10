@@ -167,15 +167,16 @@ const MOMENTUM_MESSAGES = {
 async function handleSaleModal(interaction) {
   await interaction.deferReply({ ephemeral: true });
 
-  const carrier          = interaction.fields.getTextInputValue('carrier').trim();
-  const product          = interaction.fields.getTextInputValue('product').trim();
-  const leadType         = interaction.fields.getTextInputValue('leadType').trim();
-  const presentationType = interaction.customId.split(':')[1] || 'Unknown';
-  const premiumRaw       = interaction.fields.getTextInputValue('premium').trim();
-  const premium = parseFloat(premiumRaw.replace(/[$,]/g, ''));
-  if (isNaN(premium) || premium <= 0) {
-    return interaction.editReply({ content: 'Invalid AP amount. Enter a number like 2844.' });
-  }
+  try {
+    const carrier          = interaction.fields.getTextInputValue('carrier').trim();
+    const product          = interaction.fields.getTextInputValue('product').trim();
+    const leadType         = interaction.fields.getTextInputValue('leadType').trim();
+    const presentationType = interaction.customId.split(':')[1] || 'Unknown';
+    const premiumRaw       = interaction.fields.getTextInputValue('premium').trim();
+    const premium = parseFloat(premiumRaw.replace(/[$,]/g, ''));
+    if (isNaN(premium) || premium <= 0) {
+      return interaction.editReply({ content: 'Invalid AP amount. Enter a number like 2844.' });
+    }
 
   const displayName = interaction.user.displayName || interaction.user.username;
 
@@ -531,6 +532,13 @@ async function handleSaleModal(interaction) {
       ...(personalBests.length ? [``, ...personalBests] : []),
     ].join('\n'),
   });
+
+  } catch (err) {
+    console.error('handleSaleModal error:', err);
+    try {
+      await interaction.editReply({ content: '❌ Something went wrong logging your sale. Please try again or contact an admin.' });
+    } catch (_) {}
+  }
 }
 
 function getCentralHour() {
