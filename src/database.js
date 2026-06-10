@@ -634,8 +634,9 @@ async function getTeamDailyTotal() {
   return data.reduce((sum, s) => sum + parseFloat(s.premium), 0);
 }
 
-// Returns a Set of user IDs who have logged at least one sale every Mon–Fri
-// in the same week at any point this month. Badge persists all month.
+// Returns a Set of user IDs who have logged at least one sale every Mon-Fri
+// in any COMPLETED week this month. Badge persists all month once earned,
+// but the current incomplete week never counts until Friday is done.
 async function getHotWeekBadgesSet() {
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -644,16 +645,38 @@ async function getHotWeekBadgesSet() {
     .gte('created_at', start.toISOString());
   if (error) return new Set();
 
-  // Group by user → week key → set of weekdays (Mon=1 … Fri=5)
+  // Find the most recent completed Friday in Central Time.
+  // Sales in the current incomplete week are excluded until Friday EOD.
+  const nowCentral = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+  const todayDow = nowCentral.getDay(); // 0=Sun ... 6=Sat
+  const daysSinceFri = todayDow === 5 ? 0
+    : todayDow === 6 ? 1
+    : (todayDow + 2) % 7; // Sun=2, Mon=3, Tue=4, Wed=5, Thu=6
+  const lastFriday = new Date(nowCentral);
+  lastFriday.setDate(nowCentral.getDate() - daysSinceFri);
+  lastFriday.setHours(23, 59, 59, 999);
+
+  // Group by user -> stable ISO week key (YYYY-MM-DD of that Monday) -> set of weekdays
   const userWeeks = {};
   for (const s of data) {
-    const d = new Date(new Date(s.created_at).toLocaleString('en-US', { timeZone: 'America/Chicago' }));
-    const dow = d.getDay();
+    const central = new Date(new Date(s.created_at).toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+
+    // Skip sales that fall in the current incomplete week
+    if (central > lastFriday) continue;
+
+    const dow = central.getDay();
     if (dow === 0 || dow === 6) continue; // skip weekends
-    const daysFromMon = dow - 1;
-    const mon = new Date(d);
-    mon.setDate(d.getDate() - daysFromMon);
-    const weekKey = mon.toDateString();
+
+    // Roll back to Monday of this sale's week (setDate handles month crossovers correctly)
+    const daysToMon = dow - 1; // Mon(1)->0, Tue(2)->1 ... Fri(5)->4
+    const monday = new Date(central);
+    monday.setDate(central.getDate() - daysToMon);
+
+    // Stable YYYY-MM-DD string so month crossovers never produce collisions
+    const weekKey = monday.getFullYear() + '-'
+      + String(monday.getMonth() + 1).padStart(2, '0') + '-'
+      + String(monday.getDate()).padStart(2, '0');
+
     if (!userWeeks[s.user_id]) userWeeks[s.user_id] = {};
     if (!userWeeks[s.user_id][weekKey]) userWeeks[s.user_id][weekKey] = new Set();
     userWeeks[s.user_id][weekKey].add(dow);
