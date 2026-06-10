@@ -224,21 +224,42 @@ async function getDailyChallengeWith(challengerId, challengeeId) {
 
 // Increment wins or losses for an agent in challenge_records
 async function updateChallengeRecord(userId, username, isWin) {
-  const { data: existing, error } = await supabase.from('challenge_records')
-    .select('*').eq('user_id', userId).single();
+  // maybeSingle() returns { data: null, error: null } when no row exists,
+  // unlike single() which throws PGRST116 — keeping the error path clean.
+  const { data: existing, error: fetchError } = await supabase
+    .from('challenge_records')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error(`[challenge_records] fetch error for ${userId}:`, fetchError.message);
+    throw fetchError;
+  }
+
   if (existing) {
-    await supabase.from('challenge_records').update({
+    const { error: updateError } = await supabase.from('challenge_records').update({
       username,
       wins:   existing.wins   + (isWin ? 1 : 0),
       losses: existing.losses + (isWin ? 0 : 1),
       updated_at: new Date().toISOString(),
     }).eq('user_id', userId);
+    if (updateError) {
+      console.error(`[challenge_records] update error for ${userId}:`, updateError.message);
+      throw updateError;
+    }
   } else {
-    await supabase.from('challenge_records').insert({
-      user_id: userId, username,
+    const { error: insertError } = await supabase.from('challenge_records').insert({
+      user_id: userId,
+      username,
       wins:   isWin ? 1 : 0,
       losses: isWin ? 0 : 1,
+      updated_at: new Date().toISOString(),
     });
+    if (insertError) {
+      console.error(`[challenge_records] insert error for ${userId}:`, insertError.message);
+      throw insertError;
+    }
   }
 }
 
