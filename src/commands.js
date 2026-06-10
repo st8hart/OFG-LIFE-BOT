@@ -68,9 +68,18 @@ const saleCommand = {
 const leaderboardCommand = {
   data: new SlashCommandBuilder().setName('leaderboard').setDescription('View the sales leaderboard')
     .addStringOption(opt => opt.setName('period').setDescription('Time period').setRequired(false)
-      .addChoices({ name: 'Daily', value: 'daily' }, { name: 'Weekly', value: 'weekly' }, { name: 'Monthly', value: 'monthly' })),
+      .addChoices(
+        { name: 'Daily',     value: 'daily' },
+        { name: 'Yesterday', value: 'yesterday' },
+        { name: 'Weekly',    value: 'weekly' },
+        { name: 'Monthly',   value: 'monthly' },
+      )),
   async execute(interaction) {
     const period = interaction.options.getString('period') || 'monthly';
+    if (period === 'yesterday') {
+      const embed = await buildLeaderboardEmbed('daily', false, true);
+      return interaction.reply({ embeds: [embed] });
+    }
     const embed = await buildLeaderboardEmbed(period);
     await interaction.reply({ embeds: [embed] });
   },
