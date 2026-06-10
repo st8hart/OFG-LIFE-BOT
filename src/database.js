@@ -7,14 +7,10 @@ const supabase = createClient(
 );
 
 // ── Central Time boundary helpers ────────────────────────────────────────────
-// These correctly compute UTC timestamps for midnight Central Time regardless
-// of what timezone the server runs in (Railway runs UTC). The key is computing
-// the real offset between UTC and Central (handles CDT/CST automatically).
-
 function getDayStart() {
   const realNow     = new Date();
   const centralFake = new Date(realNow.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
-  const offsetMs    = realNow - centralFake;   // e.g. 18_000_000 ms for CDT (UTC-5)
+  const offsetMs    = realNow - centralFake;
   centralFake.setHours(0, 0, 0, 0);
   return new Date(centralFake.getTime() + offsetMs);
 }
@@ -23,7 +19,7 @@ function getWeekStart(prevWeek = false) {
   const realNow     = new Date();
   const centralFake = new Date(realNow.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
   const offsetMs    = realNow - centralFake;
-  const day = centralFake.getDay(); // 0=Sun, 1=Mon ... 6=Sat (in Central time)
+  const day = centralFake.getDay();
   const daysFromMonday = day === 0 ? 6 : day - 1;
   centralFake.setDate(centralFake.getDate() - daysFromMonday - (prevWeek ? 7 : 0));
   centralFake.setHours(0, 0, 0, 0);
@@ -75,6 +71,22 @@ async function getMonthlyTotal() {
   const { data, error } = await supabase.from('sales').select('premium').gte('created_at', start.toISOString());
   if (error) throw error;
   return data.reduce((sum, s) => sum + parseFloat(s.premium), 0);
+}
+
+// Returns a map of { userId: monthlyTotal } for all agents — used so daily/weekly
+// leaderboards can show the correct monthly-based rank badge for each agent.
+async function getMonthlyTotalsMap() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const { data, error } = await supabase.from('sales')
+    .select('user_id, premium')
+    .gte('created_at', start.toISOString());
+  if (error) return {};
+  const map = {};
+  for (const s of data) {
+    map[s.user_id] = (map[s.user_id] || 0) + parseFloat(s.premium);
+  }
+  return map;
 }
 
 async function getUserStats(userId) {
@@ -435,6 +447,16 @@ async function getActiveChallenge(userId) {
   return data;
 }
 
+// Returns ALL active challenges for a user (they can have up to 3 at once)
+async function getActiveChallenges(userId) {
+  const { data, error } = await supabase.from('challenges')
+    .select('*')
+    .or(`challenger_id.eq.${userId},challengee_id.eq.${userId}`)
+    .eq('status', 'active');
+  if (error) return [];
+  return data || [];
+}
+
 async function expireChallenges() {
   await supabase.from('challenges').update({ status: 'expired' }).eq('status', 'active');
 }
@@ -543,8 +565,8 @@ async function getWeeklyMVP(prevWeek = false) {
 }
 
 module.exports = {
-  addSale, getLeaderboard, getMonthlyTotal, getUserStats, getTeamStats,
-  createChallenge, getActiveChallenge, expireChallenges,
+  addSale, getLeaderboard, getMonthlyTotal, getMonthlyTotalsMap, getUserStats, getTeamStats,
+  createChallenge, getActiveChallenge, getActiveChallenges, expireChallenges,
   getDailyChallengeCount, getDailyChallengeWith, updateChallengeRecord, getChallengeStandings,
   determineChallengeWinners, getPendingChallengeResults, clearPendingChallengeResults,
   getAllAgentFirstSales, getMonthlyChampion, getWeeklyMVP,

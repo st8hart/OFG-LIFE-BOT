@@ -1,6 +1,6 @@
 // src/leaderboard.js
 const { EmbedBuilder } = require('discord.js');
-const { getLeaderboard, getMonthlyTotal, getRankForAmount, getGoal } = require('./database');
+const { getLeaderboard, getMonthlyTotal, getMonthlyTotalsMap, getRankForAmount, getGoal } = require('./database');
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 const PERIOD_COLORS = {
@@ -29,6 +29,10 @@ async function buildLeaderboardEmbed(period, prevWeek = false) {
   const monthlyTotal = await getMonthlyTotal();
   const currentGoal = await getGoal();
   const periodTotal = rows.reduce((sum, r) => sum + r.total, 0);
+
+  // Always use monthly production for rank badges so daily/weekly boards
+  // show the same badge as the monthly leaderboard.
+  const monthlyMap = await getMonthlyTotalsMap();
 
   const monthName = new Date().toLocaleString('en-US', { month: 'long' }).toUpperCase();
   const year = new Date().getFullYear();
@@ -90,7 +94,7 @@ async function buildLeaderboardEmbed(period, prevWeek = false) {
   // Check hot streaks (daily_count >= 3) — only on daily leaderboard
   let podiumText = '';
   top5.forEach((row, i) => {
-    const rank = getRankForAmount(row.total);
+    const rank = getRankForAmount(monthlyMap[row.user_id] || 0);
     const medal = MEDALS[i] || `#${i + 1}`;
     const streak = (period === 'daily' && row.sales_count >= 3) ? ' 🔥' : '';
     podiumText += `${medal} <@${row.user_id}> — **${formatMoney(row.total)}**${streak} · ${rank.emoji} ${rank.name} *(${row.sales_count} sale${row.sales_count !== 1 ? 's' : ''})*\n`;
@@ -101,7 +105,7 @@ async function buildLeaderboardEmbed(period, prevWeek = false) {
   if (rest.length > 0) {
     let restText = '';
     rest.forEach((row, i) => {
-      const rank = getRankForAmount(row.total);
+      const rank = getRankForAmount(monthlyMap[row.user_id] || 0);
       const streak = (period === 'daily' && row.sales_count >= 3) ? ' 🔥' : '';
       restText += `#${i + 6} <@${row.user_id}> — **${formatMoney(row.total)}**${streak} · ${rank.emoji} ${rank.name}\n`;
     });
