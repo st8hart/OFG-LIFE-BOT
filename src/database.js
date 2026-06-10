@@ -38,8 +38,9 @@ function getWeekStart(prevWeek = false) {
 // ── Sales ─────────────────────────────────────────────────────────────────────
 
 async function addSale({ userId, username, clientName, policyType, premium, carrier, notes }) {
+  const safeUsername = username || `Agent_${userId}`;
   const { data, error } = await supabase.from('sales').insert([{
-    user_id: userId, username, client_name: clientName,
+    user_id: userId, username: safeUsername, client_name: clientName,
     policy_type: policyType, premium, carrier: carrier || '', notes: notes || '',
   }]).select().single();
   if (error) throw error;

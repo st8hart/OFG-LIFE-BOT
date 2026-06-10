@@ -178,7 +178,11 @@ async function handleSaleModal(interaction) {
       return interaction.editReply({ content: 'Invalid AP amount. Enter a number like 2844.' });
     }
 
-  const displayName = interaction.member?.displayName || interaction.user.globalName || interaction.user.username || 'Agent';
+  const displayName = interaction.member?.displayName
+    || interaction.user?.globalName
+    || interaction.user?.username
+    || interaction.user?.tag
+    || `Agent_${interaction.user.id}`;
 
   // Check if this is their first ever sale
   const totalSalesBefore = await getUserTotalSales(interaction.user.id);
