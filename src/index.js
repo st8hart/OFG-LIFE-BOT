@@ -63,14 +63,83 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 // ── Daily sale milestone system ───────────────────────────────────────────────
+// line: shown inside the sale alert embed for all milestones (2+)
+// shoutout: separate channel message fired at 3+ only
 function getSalesMilestone(count) {
-  if (count >= 8) return `🌌 SUPERNOVA — ${count} SALES TODAY! 🌌`;
-  if (count === 7) return `🌋 VOLCANIC FIRESTORM — 7 SALES TODAY! 🌋`;
-  if (count === 6) return `🌊 TIDAL WAVE OF AP — 6 SALES TODAY! 🌊`;
-  if (count === 5) return `⛈️ AP THUNDERSTORM — 5 SALES TODAY! ⛈️`;
-  if (count === 4) return `🍀 FOUR LEAF CLOVER — 4 SALES TODAY! 🍀`;
-  if (count === 3) return `🎩 HAT TRICK — 3 SALES TODAY! 🎩`;
-  if (count === 2) return `🔥 HEATING UP — 2 SALES TODAY! 🔥`;
+  if (count >= 8) return {
+    line: `🌌 SUPERNOVA — ${count} SALES TODAY! 🌌`,
+    shoutout: (id) => [
+      ``,
+      `🌌 SUPERNOVA! 🌌`,
+      ``,
+      `<@${id}> just logged sale #${count} today.`,
+      `Eight closes in a single day. A SUPERNOVA — the brightest explosion in the universe.`,
+      `We are not just watching a great day. We are watching OFG HISTORY.`,
+      `Tag someone who needs to see this. 👑`,
+      ``,
+    ].join('\n'),
+  };
+  if (count === 7) return {
+    line: `🌋 VOLCANIC FIRESTORM — 7 SALES TODAY! 🌋`,
+    shoutout: (id) => [
+      ``,
+      `🌋 VOLCANIC FIRESTORM! 🌋`,
+      ``,
+      `<@${id}> just dropped sale #7 today.`,
+      `Seven. In ONE day. The mountain did not stop erupting — neither are they.`,
+      `This is elite level production. Someone CHALLENGE this. 👀🔥`,
+      ``,
+    ].join('\n'),
+  };
+  if (count === 6) return {
+    line: `🌊 TIDAL WAVE OF AP — 6 SALES TODAY! 🌊`,
+    shoutout: (id) => [
+      ``,
+      `🌊 TIDAL WAVE OF AP! 🌊`,
+      ``,
+      `<@${id}> just crashed through sale #6 today.`,
+      `Six closes. The wave started small — now it is WIPING OUT the board.`,
+      `Get out of the way or get on the board. 💰`,
+      ``,
+    ].join('\n'),
+  };
+  if (count === 5) return {
+    line: `⛈️ AP THUNDERSTORM — 5 SALES TODAY! ⛈️`,
+    shoutout: (id) => [
+      ``,
+      `⛈️ AP THUNDERSTORM! ⛈️`,
+      ``,
+      `<@${id}> just hit sale #5 today and the forecast says CLOSING SEASON.`,
+      `Five policies written. The storm is HERE and it is not stopping. ⚡`,
+      ``,
+    ].join('\n'),
+  };
+  if (count === 4) return {
+    line: `🍀 FOUR LEAF CLOVER — 4 SALES TODAY! 🍀`,
+    shoutout: (id) => [
+      ``,
+      `🍀 FOUR LEAF CLOVER! 🍀`,
+      ``,
+      `<@${id}> just locked in sale #4 today.`,
+      `Some people find luck. This one MAKES it. Keep stacking. 💪`,
+      ``,
+    ].join('\n'),
+  };
+  if (count === 3) return {
+    line: `🎩 HAT TRICK — 3 SALES TODAY! 🎩`,
+    shoutout: (id) => [
+      ``,
+      `🎩 HAT TRICK! 🎩`,
+      ``,
+      `<@${id}> just dropped their 3rd sale of the day — and the board knows it.`,
+      `Three closes. One day. Zero excuses. Who's next? 🔥`,
+      ``,
+    ].join('\n'),
+  };
+  if (count === 2) return {
+    line: `🔥 HEATING UP — 2 SALES TODAY! 🔥`,
+    shoutout: null,
+  };
   return null;
 }
 
@@ -131,7 +200,7 @@ async function handleSaleModal(interaction) {
         description: [
           `🚨🔥 SALE ALERT - ${displayName} 🔥🚨`,
           ``,
-          ...(milestone ? [milestone, ``] : []),
+          ...(milestone ? [milestone.line, ``] : []),
           `🏢 Carrier: ${carrier}`,
           `💰 Product: ${product}`,
           `📞 Lead Type: ${leadType}`,
@@ -146,6 +215,11 @@ async function handleSaleModal(interaction) {
         timestamp: new Date().toISOString(),
       };
       await channel.send({ embeds: [embed] });
+
+      // Shoutout fires separately at 3+ sales
+      if (milestone?.shoutout) {
+        await channel.send(milestone.shoutout(interaction.user.id));
+      }
 
       // Whale alert for sales over $3000
       if (premium >= 3000) {
