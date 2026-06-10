@@ -574,7 +574,6 @@ async function getBestDailyBadgesMap() {
     .select('user_id, created_at')
     .gte('created_at', start.toISOString());
   if (error) return {};
-  // Group sales by user → date (Central Time), then find each user's max day
   const dailyCounts = {};
   for (const s of data) {
     const date = new Date(s.created_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' });
@@ -588,8 +587,125 @@ async function getBestDailyBadgesMap() {
   return bestMap;
 }
 
+// Returns the team's total AP for today (Central Time).
+async function getTeamDailyTotal() {
+  const start = getDayStart();
+  const { data, error } = await supabase.from('sales')
+    .select('premium')
+    .gte('created_at', start.toISOString());
+  if (error) return 0;
+  return data.reduce((sum, s) => sum + parseFloat(s.premium), 0);
+}
+
+// Returns a Set of user IDs who have logged at least one sale every Mon–Fri
+// in the same week at any point this month. Badge persists all month.
+async function getHotWeekBadgesSet() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const { data, error } = await supabase.from('sales')
+    .select('user_id, created_at')
+    .gte('created_at', start.toISOString());
+  if (error) return new Set();
+
+  // Group by user → week key → set of weekdays (Mon=1 … Fri=5)
+  const userWeeks = {};
+  for (const s of data) {
+    const d = new Date(new Date(s.created_at).toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+    const dow = d.getDay();
+    if (dow === 0 || dow === 6) continue; // skip weekends
+    const daysFromMon = dow - 1;
+    const mon = new Date(d);
+    mon.setDate(d.getDate() - daysFromMon);
+    const weekKey = mon.toDateString();
+    if (!userWeeks[s.user_id]) userWeeks[s.user_id] = {};
+    if (!userWeeks[s.user_id][weekKey]) userWeeks[s.user_id][weekKey] = new Set();
+    userWeeks[s.user_id][weekKey].add(dow);
+  }
+
+  const hotWeekUsers = new Set();
+  for (const [userId, weeks] of Object.entries(userWeeks)) {
+    for (const days of Object.values(weeks)) {
+      if (days.has(1) && days.has(2) && days.has(3) && days.has(4) && days.has(5)) {
+        hotWeekUsers.add(userId);
+        break;
+      }
+    }
+  }
+  return hotWeekUsers;
+}
+
+// 🌱 New Producer — first sale within the last 30 days
+async function getNewProducerSet() {
+  const agents = await getAllAgentFirstSales();
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const set = new Set();
+  for (const a of agents) {
+    if (new Date(a.created_at) >= cutoff) set.add(a.user_id);
+  }
+  return set;
+}
+
+// 🌅 First Sale of the Day — whoever logged the very first sale today
+async function getEarlyBirdSet() {
+  const start = getDayStart();
+  const { data, error } = await supabase.from('sales')
+    .select('user_id')
+    .gte('created_at', start.toISOString())
+    .order('created_at', { ascending: true })
+    .limit(1);
+  if (error || !data.length) return new Set();
+  return new Set([data[0].user_id]);
+}
+
+// 💰 High Roller — logged a single sale over $3,000 this month
+async function getHighRollerSet() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const { data, error } = await supabase.from('sales')
+    .select('user_id, premium')
+    .gte('created_at', start.toISOString());
+  if (error) return new Set();
+  const set = new Set();
+  for (const s of data) {
+    if (parseFloat(s.premium) >= 3000) set.add(s.user_id);
+  }
+  return set;
+}
+
+// 🎖️ Reigning Champ — last month's #1 producer, wears badge all current month
+async function getReigningChampionId() {
+  const now = new Date();
+  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastMonthEnd   = new Date(now.getFullYear(), now.getMonth(), 1);
+  const { data, error } = await supabase.from('sales')
+    .select('user_id, premium')
+    .gte('created_at', lastMonthStart.toISOString())
+    .lt('created_at', lastMonthEnd.toISOString());
+  if (error || !data.length) return null;
+  const totals = {};
+  for (const s of data) {
+    totals[s.user_id] = (totals[s.user_id] || 0) + parseFloat(s.premium);
+  }
+  return Object.entries(totals).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+}
+
+// 🏋️ Showstopper — holds the biggest single sale of the month
+async function getShowstopperId() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const { data, error } = await supabase.from('sales')
+    .select('user_id, premium')
+    .gte('created_at', start.toISOString())
+    .order('premium', { ascending: false })
+    .limit(1);
+  if (error || !data.length) return null;
+  return data[0].user_id;
+}
+
 module.exports = {
   addSale, getLeaderboard, getMonthlyTotal, getMonthlyTotalsMap, getBestDailyBadgesMap, getUserStats, getTeamStats,
+  getTeamDailyTotal, getHotWeekBadgesSet,
+  getNewProducerSet, getEarlyBirdSet, getHighRollerSet, getReigningChampionId, getShowstopperId,
   createChallenge, getActiveChallenge, getActiveChallenges, expireChallenges,
   getDailyChallengeCount, getDailyChallengeWith, updateChallengeRecord, getChallengeStandings,
   determineChallengeWinners, getPendingChallengeResults, clearPendingChallengeResults,

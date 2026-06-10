@@ -4,12 +4,13 @@ const { Client, GatewayIntentBits, Events, Collection } = require('discord.js');
 const {
   addSale, getUserStats, getRankForAmount, getMonthlyTotal, getGoal, setGoal,
   getUserTotalSales, getDailySalesCount, getTeamDailySalesCount, getMonthlyTopSale,
-  getActiveChallenge, expireChallenges,
+  expireChallenges,
   determineChallengeWinners, getPendingChallengeResults, clearPendingChallengeResults, getAllAgentFirstSales,
-  getChallengeStandings,
+  getChallengeStandings, getActiveChallenges,
   getMonthlyChampion, getWeeklyMVP,
   getAllTimeRecords, setAllTimeRecord, getMonthlyRecords,
   getUserDailyTotal, getUserWeeklyTotal,
+  getTeamDailyTotal,
 } = require('./database');
 const { buildLeaderboardEmbed, formatMoney } = require('./leaderboard');
 const {
@@ -142,6 +143,23 @@ function getSalesMilestone(count) {
   };
   return null;
 }
+
+// ── Team Momentum System ──────────────────────────────────────────────────────
+// Tracks which daily AP thresholds have already fired today (resets at midnight)
+const firedMomentumThresholds = new Set();
+
+const MOMENTUM_MESSAGES = {
+  20000:  () => `💨 THE BOARD IS MOVING! 💨\n\nOFG just crossed $20,000 in AP today.\nEngines are warm. Phones are ringing. Who's next? 🔥`,
+  30000:  () => `⚡ $30K AND CLIMBING! ⚡\n\nOFG just crossed $30,000 in AP today.\nThirty thousand and the day is not even close to over.\nThis team does not slow down. Keep dialing. 💪`,
+  40000:  () => `🔥 $40K ON THE BOARD! 🔥\n\nOFG just crossed $40,000 in AP today.\nForty thousand dollars of CLOSED business.\nThe momentum is REAL. Somebody keep it going. 👀`,
+  50000:  () => `🚀 FIFTY THOUSAND DOLLARS! 🚀\n\nOFG just crossed $50,000 in AP today.\nHalfway to a legendary day and we are not done.\nThis is what a locked-in team looks like. 💎`,
+  60000:  () => `💎 $60K — WE ARE ROLLING! 💎\n\nOFG just crossed $60,000 in AP today.\nSixty thousand. The board keeps stacking.\nAnybody sitting on the sideline needs to get IN. 🔥`,
+  70000:  () => `👑 $70K AND THE DAY IS STILL OPEN! 👑\n\nOFG just crossed $70,000 in AP today.\nSeventy thousand dollars of closed business today alone.\nRare air. Not many teams on the planet doing this. 🚀`,
+  80000:  () => `🌊 $80K — THE WAVE IS UNSTOPPABLE! 🌊\n\nOFG just crossed $80,000 in AP today.\nEighty thousand. Every single close on this board matters.\nWe are building something SPECIAL today. 💪👑`,
+  90000:  () => `🌋 $90K — WE ARE ERUPTING! 🌋\n\nOFG just crossed $90,000 in AP today.\nNinety thousand dollars and the board is STILL burning.\nTen thousand away from six figures. Who wants to put us over? 👀🔥`,
+  100000: () => `💥 SIX FIGURES IN A SINGLE DAY! 💥\n\nOFG just crossed $100,000 in AP today.\nOne hundred thousand dollars. TODAY.\nThis is what ELITE looks like. The whole industry wishes they were us right now. 🏆🌌`,
+  110000: () => `🌌 $110,000. ONE DAY. OFG. 🌌\n\nWe just crossed $110,000 in AP today.\nThis is not a good day. This is not a great day.\nThis is an ALL-TIME day. Every single person who closed — you are the reason.\nThis is what we are built for. 👑`,
+};
 
 async function handleSaleModal(interaction) {
   await interaction.deferReply({ ephemeral: true });
@@ -363,9 +381,10 @@ async function handleSaleModal(interaction) {
     }
   }
 
-  // Challenge update
-  const challenge = await getActiveChallenge(interaction.user.id);
-  if (challenge && salesChannelId) {
+  // Challenge updates — loop through ALL active challenges (user can have up to 3)
+  const challenges = await getActiveChallenges(interaction.user.id);
+  for (const challenge of challenges) {
+    if (!salesChannelId) break;
     try {
       const ch = await client.channels.fetch(salesChannelId);
       const isChallenger = challenge.challenger_id === interaction.user.id;
@@ -374,15 +393,33 @@ async function handleSaleModal(interaction) {
       const oppStats = await getUserStats(opponentId);
       const myTotal = myStats?.daily_total || 0;
       const oppTotal = oppStats?.daily_total || 0;
+      const tied = myTotal === oppTotal;
       const leading = myTotal > oppTotal;
       await ch.send([
         ``,
         `⚔️ CHALLENGE UPDATE`,
         `<@${interaction.user.id}>: ${formatMoney(myTotal)} vs <@${opponentId}>: ${formatMoney(oppTotal)}`,
-        leading ? `<@${interaction.user.id}> is in the LEAD! 🔥` : `<@${opponentId}> is leading - time to close! 💪`,
+        tied    ? `It's TIED! Better close another one! 🔥` :
+        leading ? `<@${interaction.user.id}> is in the LEAD! 🔥` :
+                  `<@${opponentId}> is leading — time to close! 💪`,
         ``,
       ].join('\n'));
     } catch (err) { console.error('Challenge update error:', err.message); }
+  }
+
+  // Team momentum check — fires when daily AP crosses each $10k threshold
+  if (salesChannelId) {
+    try {
+      const teamDaily = await getTeamDailyTotal();
+      const thresholds = [20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000, 100000, 110000];
+      const ch = await client.channels.fetch(salesChannelId);
+      for (const threshold of thresholds) {
+        if (teamDaily >= threshold && !firedMomentumThresholds.has(threshold)) {
+          firedMomentumThresholds.add(threshold);
+          await ch.send(MOMENTUM_MESSAGES[threshold]());
+        }
+      }
+    } catch (err) { console.error('Momentum error:', err.message); }
   }
 
   // Goal auto-increment
@@ -509,6 +546,7 @@ function scheduleLeaderboards(client) {
     // Reset challenges at midnight
     if (hour === 0 && min === 0 && !lastPosted[key('reset-challenges')]) {
       lastPosted[key('reset-challenges')] = true;
+      firedMomentumThresholds.clear();
       try { await expireChallenges(); } catch (err) { console.error('Challenge reset error:', err.message); }
     }
 

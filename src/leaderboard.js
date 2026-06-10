@@ -1,6 +1,6 @@
 // src/leaderboard.js
 const { EmbedBuilder } = require('discord.js');
-const { getLeaderboard, getMonthlyTotal, getMonthlyTotalsMap, getBestDailyBadgesMap, getRankForAmount, getGoal } = require('./database');
+const { getLeaderboard, getMonthlyTotal, getMonthlyTotalsMap, getBestDailyBadgesMap, getHotWeekBadgesSet, getNewProducerSet, getEarlyBirdSet, getHighRollerSet, getReigningChampionId, getShowstopperId, getRankForAmount, getGoal } = require('./database');
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 const PERIOD_COLORS = {
@@ -40,9 +40,14 @@ async function buildLeaderboardEmbed(period, prevWeek = false) {
   const monthlyTotal = await getMonthlyTotal();
   const currentGoal = await getGoal();
   const periodTotal = rows.reduce((sum, r) => sum + r.total, 0);
-  const monthlyMap = await getMonthlyTotalsMap();
-  // Best single-day count this month per user — milestone badge persists all month
-  const badgeMap = await getBestDailyBadgesMap();
+  const monthlyMap      = await getMonthlyTotalsMap();
+  const badgeMap        = await getBestDailyBadgesMap();
+  const hotWeekSet      = await getHotWeekBadgesSet();
+  const newProducerSet  = await getNewProducerSet();
+  const highRollerSet   = await getHighRollerSet();
+  const reigningChampId = await getReigningChampionId();
+  const showstopperId   = await getShowstopperId();
+  const earlyBirdSet    = period === 'daily' ? await getEarlyBirdSet() : new Set();
 
   const monthName = new Date().toLocaleString('en-US', { month: 'long' }).toUpperCase();
   const year = new Date().getFullYear();
@@ -103,11 +108,17 @@ async function buildLeaderboardEmbed(period, prevWeek = false) {
 
   let podiumText = '';
   top5.forEach((row, i) => {
-    const rank = getRankForAmount(monthlyMap[row.user_id] || 0);
-    const medal = MEDALS[i] || `#${i + 1}`;
-    const streak = (period === 'daily' && row.sales_count >= 3) ? ' 🔥' : '';
-    const milestone = getMilestoneEmoji(badgeMap[row.user_id] || 0);
-    podiumText += `${medal} <@${row.user_id}> — **${formatMoney(row.total)}**${streak} · ${rank.emoji}${milestone} *(${row.sales_count} sale${row.sales_count !== 1 ? 's' : ''})*\n`;
+    const rank        = getRankForAmount(monthlyMap[row.user_id] || 0);
+    const medal       = MEDALS[i] || `#${i + 1}`;
+    const milestone   = getMilestoneEmoji(badgeMap[row.user_id] || 0);
+    const champ       = reigningChampId === row.user_id  ? '🎖️' : '';
+    const showstopper = showstopperId   === row.user_id  ? '🏋️' : '';
+    const hotWeek     = hotWeekSet.has(row.user_id)      ? '📅' : '';
+    const earlyBird   = earlyBirdSet.has(row.user_id)    ? '🌅' : '';
+    const newProd     = newProducerSet.has(row.user_id)  ? '🌱' : '';
+    const highRoller  = highRollerSet.has(row.user_id)   ? '🐋' : '';
+    const badges      = `${champ}${showstopper}${hotWeek}${earlyBird}${newProd}${highRoller}${milestone}`;
+    podiumText += `${medal} <@${row.user_id}> — **${formatMoney(row.total)}** · ${rank.emoji}${badges} *(${row.sales_count} sale${row.sales_count !== 1 ? 's' : ''})*\n`;
   });
 
   embed.addFields({ name: '─────────────────────', value: podiumText, inline: false });
@@ -115,10 +126,16 @@ async function buildLeaderboardEmbed(period, prevWeek = false) {
   if (rest.length > 0) {
     let restText = '';
     rest.forEach((row, i) => {
-      const rank = getRankForAmount(monthlyMap[row.user_id] || 0);
-      const streak = (period === 'daily' && row.sales_count >= 3) ? ' 🔥' : '';
-      const milestone = getMilestoneEmoji(badgeMap[row.user_id] || 0);
-      restText += `#${i + 6} <@${row.user_id}> — **${formatMoney(row.total)}**${streak} · ${rank.emoji}${milestone}\n`;
+      const rank        = getRankForAmount(monthlyMap[row.user_id] || 0);
+      const milestone   = getMilestoneEmoji(badgeMap[row.user_id] || 0);
+      const champ       = reigningChampId === row.user_id  ? '🎖️' : '';
+      const showstopper = showstopperId   === row.user_id  ? '🏋️' : '';
+      const hotWeek     = hotWeekSet.has(row.user_id)      ? '📅' : '';
+      const earlyBird   = earlyBirdSet.has(row.user_id)    ? '🌅' : '';
+      const newProd     = newProducerSet.has(row.user_id)  ? '🌱' : '';
+      const highRoller  = highRollerSet.has(row.user_id)   ? '🐋' : '';
+      const badges      = `${champ}${showstopper}${hotWeek}${earlyBird}${newProd}${highRoller}${milestone}`;
+      restText += `#${i + 6} <@${row.user_id}> — **${formatMoney(row.total)}** · ${rank.emoji}${badges}\n`;
     });
     embed.addFields({ name: '─────────────────────', value: restText, inline: false });
   }
@@ -131,8 +148,13 @@ async function buildLeaderboardEmbed(period, prevWeek = false) {
         `**Rank** · Monthly AP production`,
         `🚀 $0+ · ⚔️ $5k+ · 🛡️ $10k+ · 👑 $25k+ · 💎 $50k+ · 🏆 $100k+`,
         ``,
+        `**Achievement Badges**`,
+        `🎖️ Reigning Champ · 🏋️ Biggest Sale of the Month`,
+        `📅 Sale Every Day in a Week · 🐋 High Roller ($3k+ sale) · 🌱 New Producer (first 30 days)`,
+        `🌅 First Sale of the Day (daily only)`,
+        ``,
         `**Best day this month**`,
-        `🔥 2 sales · 🎩 3 · 🍀 4 · ⛈️ 5 · 🌊 6 · 🌋 7 · 🌌 8+`,
+        `🔥 2 · 🎩 3 · 🍀 4 · ⛈️ 5 · 🌊 6 · 🌋 7 · 🌌 8+`,
       ].join('\n'),
       inline: false,
     });
