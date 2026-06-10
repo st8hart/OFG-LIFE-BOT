@@ -128,8 +128,10 @@ async function buildLeaderboardEmbed(period, prevWeek = false) {
     embed.addFields({
       name: '📊 Badge Guide',
       value: [
-        `**Rank** · Based on monthly AP production`,
-        `**Milestone** · Based on sales count this period`,
+        `**Rank** · Monthly AP production`,
+        `🚀 $0+ · 🗡️ $5k+ · 👑 $10k+ · 🔮 $25k+ · ⚡ $50k+ · 🏆 $100k+`,
+        ``,
+        `**Best day this month**`,
         `🔥 2 sales · 🎩 3 · 🍀 4 · ⛈️ 5 · 🌊 6 · 🌋 7 · 🌌 8+`,
       ].join('\n'),
       inline: false,
