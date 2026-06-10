@@ -15,6 +15,15 @@ function getDayStart() {
   return new Date(centralFake.getTime() + offsetMs);
 }
 
+function getYesterdayStart() {
+  const realNow     = new Date();
+  const centralFake = new Date(realNow.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+  const offsetMs    = realNow - centralFake;
+  centralFake.setDate(centralFake.getDate() - 1);
+  centralFake.setHours(0, 0, 0, 0);
+  return new Date(centralFake.getTime() + offsetMs);
+}
+
 function getWeekStart(prevWeek = false) {
   const realNow     = new Date();
   const centralFake = new Date(realNow.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
@@ -37,12 +46,19 @@ async function addSale({ userId, username, clientName, policyType, premium, carr
   return data;
 }
 
-async function getLeaderboard(period, prevWeek = false) {
+async function getLeaderboard(period, prevWeek = false, prevDay = false) {
   let query = supabase.from('sales').select('user_id, username, premium');
   const now = new Date();
   if (period === 'daily') {
-    const start = getDayStart();
-    query = query.gte('created_at', start.toISOString());
+    if (prevDay) {
+      // Yesterday's window: yesterday midnight → today midnight
+      query = query
+        .gte('created_at', getYesterdayStart().toISOString())
+        .lt('created_at', getDayStart().toISOString());
+    } else {
+      const start = getDayStart();
+      query = query.gte('created_at', start.toISOString());
+    }
   } else if (period === 'weekly') {
     const start = getWeekStart(prevWeek);
     query = query.gte('created_at', start.toISOString());
@@ -724,7 +740,7 @@ async function getShowstopperId() {
 
 module.exports = {
   addSale, getLeaderboard, getMonthlyTotal, getMonthlyTotalsMap, getBestDailyBadgesMap, getUserStats, getTeamStats,
-  getTeamDailyTotal, getHotWeekBadgesSet,
+  getTeamDailyTotal, getHotWeekBadgesSet, getYesterdayStart,
   getNewProducerSet, getEarlyBirdSet, getHighRollerSet, getReigningChampionId, getShowstopperId, getPersonalBestSale,
   createChallenge, getActiveChallenge, getActiveChallenges, getAllActiveChallenges, expireChallenges,
   getDailyChallengeCount, getDailyChallengeWith, updateChallengeRecord, getChallengeStandings,

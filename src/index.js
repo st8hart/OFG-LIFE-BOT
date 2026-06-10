@@ -548,12 +548,12 @@ function scheduleLeaderboards(client) {
     } catch (err) { console.error('Leaderboard error:', err.message); }
   };
 
-  const postFinalLeaderboard = async (period, intro, prevWeek = false) => {
+  const postFinalLeaderboard = async (period, intro, prevWeek = false, prevDay = false) => {
     const channelId = process.env.LEADERBOARD_CHANNEL_ID;
     if (!channelId) return;
     try {
       const channel = await client.channels.fetch(channelId);
-      const embed = await buildLeaderboardEmbed(period, prevWeek);
+      const embed = await buildLeaderboardEmbed(period, prevWeek, prevDay);
       embed.setColor(0xFFD700);
       await channel.send({ content: intro, embeds: [embed] });
     } catch (err) { console.error('Final leaderboard error:', err.message); }
@@ -725,7 +725,7 @@ function scheduleLeaderboards(client) {
         ``,
         `⬇️ Here's how the team FINISHED yesterday. Salute to everyone who put in work! 🫡`,
         ``,
-      ].join('\n'));
+      ].join('\n'), false, true); // prevDay=true so it shows yesterday's data
     }
 
     // Weekly at 9am except Monday

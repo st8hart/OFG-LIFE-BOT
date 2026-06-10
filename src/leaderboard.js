@@ -35,8 +35,8 @@ async function getPeriodTotal(period, rows) {
   return rows.reduce((sum, r) => sum + r.total, 0);
 }
 
-async function buildLeaderboardEmbed(period, prevWeek = false) {
-  const rows = await getLeaderboard(period, prevWeek);
+async function buildLeaderboardEmbed(period, prevWeek = false, prevDay = false) {
+  const rows = await getLeaderboard(period, prevWeek, prevDay);
   const monthlyTotal = await getMonthlyTotal();
   const currentGoal = await getGoal();
   const periodTotal = rows.reduce((sum, r) => sum + r.total, 0);
@@ -53,7 +53,7 @@ async function buildLeaderboardEmbed(period, prevWeek = false) {
   const year = new Date().getFullYear();
 
   let title = '';
-  if (period === 'daily')   title = `📅 OFG TODAY'S LEADERBOARD`;
+  if (period === 'daily')   title = prevDay ? `📅 OFG YESTERDAY'S LEADERBOARD` : `📅 OFG TODAY'S LEADERBOARD`;
   if (period === 'weekly')  title = prevWeek ? `📆 OFG LAST WEEK'S LEADERBOARD` : `📆 OFG THIS WEEK'S LEADERBOARD`;
   if (period === 'monthly') title = `🏆 OFG ${monthName} ${year} LEADERBOARD`;
 
@@ -63,7 +63,7 @@ async function buildLeaderboardEmbed(period, prevWeek = false) {
   // Period summary block
   if (period === 'daily') {
     embed.addFields({
-      name: '📅 Today at a Glance',
+      name: prevDay ? '📅 Yesterday at a Glance' : '📅 Today at a Glance',
       value: [
         `**Daily Total: ${formatMoney(periodTotal)}**`,
         ``,
