@@ -7,6 +7,7 @@ const {
 const {
   getUserStats, getRankForAmount, getRecentSales, deleteSale,
   adminDeleteSale, getGoal, setGoal, getTeamStats,
+  getAllActiveChallenges, getUserDailyTotal,
 } = require('./database');
 const { buildLeaderboardEmbed, formatMoney } = require('./leaderboard');
 
@@ -198,8 +199,13 @@ const setGoalCommand = {
   },
 };
 
+module.exports = {
+  saleCommand, leaderboardCommand, myStatsCommand, teamStatsCommand,
+  recentSalesCommand, deleteSaleCommand, removeSaleCommand, setGoalCommand,
+};
+
 // ── /challenge ────────────────────────────────────────────────────────────────
-const { createChallenge, getActiveChallenge, getDailyChallengeCount, getDailyChallengeWith, getChallengeStandings } = require('./database');
+const { createChallenge, getActiveChallenge } = require('./database');
 
 const challengeCommand = {
   data: new SlashCommandBuilder()
@@ -208,105 +214,34 @@ const challengeCommand = {
     .addUserOption(opt => opt.setName('agent').setDescription('Who do you want to challenge?').setRequired(true)),
   async execute(interaction) {
     const target = interaction.options.getUser('agent');
-
     if (target.id === interaction.user.id) {
       return interaction.reply({ content: 'You cannot challenge yourself!', ephemeral: true });
     }
-
-    // 3 challenges max per day
-    const dailyCount = await getDailyChallengeCount(interaction.user.id);
-    if (dailyCount >= 3) {
-      return interaction.reply({
-        content: [
-          ``,
-          `⚔️ Challenge limit reached! ⚔️`,
-          ``,
-          `You've already issued **3 challenges** today — that's the daily max.`,
-          `Come back tomorrow and run it back! 🔥`,
-          ``,
-        ].join('\n'),
-        ephemeral: true,
-      });
+    const existing = await getActiveChallenge(interaction.user.id);
+    if (existing) {
+      return interaction.reply({ content: 'You already have an active challenge today!', ephemeral: true });
     }
-
-    // Can't challenge the same person twice in one day
-    const alreadyChallenged = await getDailyChallengeWith(interaction.user.id, target.id);
-    if (alreadyChallenged) {
-      return interaction.reply({
-        content: `You already challenged <@${target.id}> today! Wait for the results tomorrow morning. ⏳`,
-        ephemeral: true,
-      });
-    }
-
     await createChallenge(
       interaction.user.id,
       interaction.user.displayName || interaction.user.username,
       target.id,
       target.displayName || target.username
     );
-
-    const remaining = 3 - (dailyCount + 1);
     await interaction.reply({
       content: [
         ``,
-        `⚔️🔥 CHALLENGE ISSUED! 🔥⚔️`,
+        `⚔️ CHALLENGE ISSUED! ⚔️`,
         ``,
         `<@${interaction.user.id}> just challenged <@${target.id}> to a sales battle!`,
-        `Who closes more AP by end of day? 👀💰`,
+        `Who closes more AP by end of day? 👀🔥`,
         `May the best agent win! 💪`,
-        ``,
-        remaining > 0 ? `🎯 You have **${remaining}** challenge slot${remaining !== 1 ? 's' : ''} remaining today.` : `🎯 That's your 3rd challenge today — you're all in! 🔥`,
         ``,
       ].join('\n'),
     });
   },
 };
 
-
-
-// ── /standings ────────────────────────────────────────────────────────────────
-const MEDALS = ['🥇', '🥈', '🥉'];
-
-function buildStandingsEmbed(records) {
-  if (!records || records.length === 0) {
-    return {
-      color: 0xFF6B35,
-      title: '⚔️ OFG HEAD TO HEAD STANDINGS ⚔️',
-      description: '*No challenges completed yet. Issue a `/challenge` and get on the board!*',
-      footer: { text: 'OFG - Production Tracker' },
-      timestamp: new Date().toISOString(),
-    };
-  }
-
-  let desc = '';
-  records.forEach((r, i) => {
-    const total = r.wins + r.losses;
-    const pct = total > 0 ? Math.round((r.wins / total) * 100) : 0;
-    const medal = MEDALS[i] || `#${i + 1}`;
-    desc += `${medal} **${r.username}** — ${r.wins}W-${r.losses}L *(${pct}% win rate)*\n`;
-  });
-
-  return {
-    color: 0xFF6B35,
-    title: '⚔️ OFG HEAD TO HEAD STANDINGS ⚔️',
-    description: desc,
-    footer: { text: 'OFG - Production Tracker • All-Time Record' },
-    timestamp: new Date().toISOString(),
-  };
-}
-
-const standingsCommand = {
-  data: new SlashCommandBuilder()
-    .setName('standings')
-    .setDescription('View the OFG all-time head to head challenge standings'),
-  async execute(interaction) {
-    await interaction.deferReply();
-    const records = await getChallengeStandings();
-    await interaction.editReply({ embeds: [buildStandingsEmbed(records)] });
-  },
-};
-
-
+module.exports.challengeCommand = challengeCommand;
 
 // ── /mypersonalgoal ───────────────────────────────────────────────────────────
 const { setPersonalGoal, getPersonalGoal, getAllPersonalGoals, getUserStats: getStats } = require('./database');
@@ -389,7 +324,8 @@ const teamGoalsCommand = {
   },
 };
 
-
+module.exports.myPersonalGoalCommand = myPersonalGoalCommand;
+module.exports.teamGoalsCommand = teamGoalsCommand;
 
 // ── /editsale (admin only) ────────────────────────────────────────────────────
 const { editSale, getSaleById } = require('./database');
@@ -436,7 +372,7 @@ const editSaleCommand = {
   },
 };
 
-
+module.exports.editSaleCommand = editSaleCommand;
 
 // ── /myeditsale (own sales only) ──────────────────────────────────────────────
 const myEditSaleCommand = {
@@ -480,10 +416,64 @@ const myEditSaleCommand = {
   },
 };
 
-module.exports = {
-  saleCommand, leaderboardCommand, myStatsCommand, teamStatsCommand,
-  recentSalesCommand, deleteSaleCommand, removeSaleCommand, setGoalCommand,
-  challengeCommand, standingsCommand, buildStandingsEmbed,
-  myPersonalGoalCommand, teamGoalsCommand,
-  editSaleCommand, myEditSaleCommand,
+module.exports.myEditSaleCommand = myEditSaleCommand;
+
+// ── /challenges ───────────────────────────────────────────────────────────────
+const challengesCommand = {
+  data: new SlashCommandBuilder()
+    .setName('challenges')
+    .setDescription('View all live challenge battles and current scores'),
+  async execute(interaction) {
+    await interaction.deferReply();
+
+    const active = await getAllActiveChallenges();
+
+    if (!active.length) {
+      return interaction.editReply({
+        embeds: [{
+          color: 0xFF6B35,
+          title: '⚔️ OFG LIVE CHALLENGE BOARD ⚔️',
+          description: '*No active challenges right now.\nThink you can take someone down? Drop a `/challenge` and find out.* 👀',
+          footer: { text: 'OFG - Production Tracker' },
+          timestamp: new Date().toISOString(),
+        }],
+      });
+    }
+
+    const fields = [];
+    for (const c of active) {
+      const challengerTotal  = await getUserDailyTotal(c.challenger_id);
+      const challengeeTotal  = await getUserDailyTotal(c.challengee_id);
+      const tied    = challengerTotal === challengeeTotal;
+      const leaderId = challengerTotal >= challengeeTotal ? c.challenger_id : c.challengee_id;
+      const margin  = Math.abs(challengerTotal - challengeeTotal);
+
+      const statusLine = tied
+        ? `🤝 **TIED** — Anyone's game!`
+        : `🔥 <@${leaderId}> leads by **${formatMoney(margin)}**`;
+
+      fields.push({
+        name: `⚔️ <@${c.challenger_id}> vs <@${c.challengee_id}>`,
+        value: [
+          `💰 <@${c.challenger_id}> — **${formatMoney(challengerTotal)}** AP`,
+          `💰 <@${c.challengee_id}> — **${formatMoney(challengeeTotal)}** AP`,
+          statusLine,
+        ].join('\n'),
+        inline: false,
+      });
+    }
+
+    await interaction.editReply({
+      embeds: [{
+        color: 0xFF6B35,
+        title: '⚔️ OFG LIVE CHALLENGE BOARD ⚔️',
+        description: `**${active.length} active battle${active.length !== 1 ? 's' : ''} in progress.** Scores update live with every sale. 🔥`,
+        fields,
+        footer: { text: 'OFG - Production Tracker' },
+        timestamp: new Date().toISOString(),
+      }],
+    });
+  },
 };
+
+module.exports.challengesCommand = challengesCommand;

@@ -634,6 +634,15 @@ async function getHotWeekBadgesSet() {
   return hotWeekUsers;
 }
 
+// Returns all currently active challenges across the whole team
+async function getAllActiveChallenges() {
+  const { data, error } = await supabase.from('challenges')
+    .select('*')
+    .eq('status', 'active');
+  if (error) return [];
+  return data || [];
+}
+
 // 🌱 New Producer — first sale within the last 30 days
 async function getNewProducerSet() {
   const agents = await getAllAgentFirstSales();
@@ -689,6 +698,17 @@ async function getReigningChampionId() {
   return Object.entries(totals).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
 }
 
+// Returns the highest single sale premium a user has ever logged (all time)
+async function getPersonalBestSale(userId) {
+  const { data, error } = await supabase.from('sales')
+    .select('premium')
+    .eq('user_id', userId)
+    .order('premium', { ascending: false })
+    .limit(1);
+  if (error || !data.length) return 0;
+  return parseFloat(data[0].premium);
+}
+
 // 🏋️ Showstopper — holds the biggest single sale of the month
 async function getShowstopperId() {
   const now = new Date();
@@ -705,8 +725,8 @@ async function getShowstopperId() {
 module.exports = {
   addSale, getLeaderboard, getMonthlyTotal, getMonthlyTotalsMap, getBestDailyBadgesMap, getUserStats, getTeamStats,
   getTeamDailyTotal, getHotWeekBadgesSet,
-  getNewProducerSet, getEarlyBirdSet, getHighRollerSet, getReigningChampionId, getShowstopperId,
-  createChallenge, getActiveChallenge, getActiveChallenges, expireChallenges,
+  getNewProducerSet, getEarlyBirdSet, getHighRollerSet, getReigningChampionId, getShowstopperId, getPersonalBestSale,
+  createChallenge, getActiveChallenge, getActiveChallenges, getAllActiveChallenges, expireChallenges,
   getDailyChallengeCount, getDailyChallengeWith, updateChallengeRecord, getChallengeStandings,
   determineChallengeWinners, getPendingChallengeResults, clearPendingChallengeResults,
   getAllAgentFirstSales, getMonthlyChampion, getWeeklyMVP,

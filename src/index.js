@@ -2,8 +2,8 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, Events, Collection } = require('discord.js');
 const {
-  addSale, getUserStats, getRankForAmount, getMonthlyTotal, getGoal, setGoal,
-  getUserTotalSales, getDailySalesCount, getTeamDailySalesCount, getMonthlyTopSale,
+  addSale, getUserStats, getRankForAmount, getMonthlyTotal, getGoal, setGoal, getTeamStats,
+  getUserTotalSales, getDailySalesCount, getTeamDailySalesCount, getMonthlyTopSale, getPersonalBestSale,
   expireChallenges,
   determineChallengeWinners, getPendingChallengeResults, clearPendingChallengeResults, getAllAgentFirstSales,
   getChallengeStandings, getActiveChallenges,
@@ -23,6 +23,7 @@ const {
   teamGoalsCommand,
   editSaleCommand,
   myEditSaleCommand,
+  challengesCommand,
 } = require('./commands');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -37,6 +38,7 @@ const commands = [
   teamGoalsCommand,
   editSaleCommand,
   myEditSaleCommand,
+  challengesCommand,
 ];
 for (const cmd of commands) client.commands.set(cmd.data.name, cmd);
 
@@ -147,6 +149,7 @@ function getSalesMilestone(count) {
 // ── Team Momentum System ──────────────────────────────────────────────────────
 // Tracks which daily AP thresholds have already fired today (resets at midnight)
 const firedMomentumThresholds = new Set();
+let firedRecordWatch = false;
 
 const MOMENTUM_MESSAGES = {
   20000:  () => `💨 THE BOARD IS MOVING! 💨\n\nOFG just crossed $20,000 in AP today.\nEngines are warm. Phones are ringing. Who's next? 🔥`,
@@ -186,6 +189,10 @@ async function handleSaleModal(interaction) {
 
   // Get current monthly top sale before adding
   const prevTopSale = await getMonthlyTopSale();
+
+  // Capture personal bests BEFORE adding the sale so we can compare after
+  const statsBefore    = await getUserStats(interaction.user.id);
+  const prevBestSale   = await getPersonalBestSale(interaction.user.id);
 
   await addSale({
     userId: interaction.user.id,
@@ -419,6 +426,28 @@ async function handleSaleModal(interaction) {
           await ch.send(MOMENTUM_MESSAGES[threshold]());
         }
       }
+
+      // Record Watch — alert when team is within $5k of the all-time daily record
+      if (!firedRecordWatch) {
+        const teamStats = await getTeamStats();
+        const record = parseFloat(teamStats.best_day_amount || 0);
+        const gap = record - teamDaily;
+        if (record > 0 && gap > 0 && gap <= 5000) {
+          firedRecordWatch = true;
+          await ch.send([
+            ``,
+            `🎯 RECORD WATCH! 🎯`,
+            ``,
+            `The team is within ${formatMoney(gap)} of an ALL-TIME daily record!`,
+            ``,
+            `📈 Team Today: ${formatMoney(teamDaily)}`,
+            `🏆 All-Time Record: ${formatMoney(record)}`,
+            ``,
+            `Who is going to put us over the top? One more close and history is MADE. 🔥`,
+            ``,
+          ].join('\n'));
+        }
+      }
     } catch (err) { console.error('Momentum error:', err.message); }
   }
 
@@ -445,8 +474,62 @@ async function handleSaleModal(interaction) {
     }
   }
 
+  // ── Personal best notifications (ephemeral — only visible to the agent) ──────
+  // Only fire for agents who have prior history (not their very first sale)
+  const personalBests = [];
+
+  if (totalSalesBefore > 0) {
+    // Biggest single sale ever
+    if (premium > prevBestSale) {
+      personalBests.push([
+        `🏆 NEW PERSONAL BEST SALE! 🏆`,
+        ``,
+        `${formatMoney(premium)} AP — that is your biggest single sale in your OFG career.`,
+        `You just set a new bar for yourself.`,
+        `Remember this feeling. Now go top it. 💎`,
+      ].join('\n'));
+    }
+
+    // Biggest day ever — fires only the first time today crosses the previous record
+    if (statsBefore.daily_total < statsBefore.best_day && stats.daily_total > statsBefore.best_day) {
+      personalBests.push([
+        `🌟 YOUR BEST DAY EVER! 🌟`,
+        ``,
+        `${formatMoney(stats.daily_total)} AP in a single day — a brand new personal record.`,
+        `You just rewrote your own history today.`,
+        `This is what showing up looks like. 🔥`,
+      ].join('\n'));
+    }
+
+    // Biggest week ever
+    if (statsBefore.weekly_total < statsBefore.best_week && stats.weekly_total > statsBefore.best_week) {
+      personalBests.push([
+        `🚀 YOUR BEST WEEK EVER! 🚀`,
+        ``,
+        `${formatMoney(stats.weekly_total)} AP this week — your biggest week at OFG.`,
+        `You are not just growing. You are accelerating.`,
+        `Keep this energy going. 💪`,
+      ].join('\n'));
+    }
+
+    // Biggest month ever
+    if (statsBefore.monthly_total < statsBefore.best_month && stats.monthly_total > statsBefore.best_month) {
+      personalBests.push([
+        `👑 YOUR BEST MONTH EVER — AND IT'S NOT OVER! 👑`,
+        ``,
+        `${formatMoney(stats.monthly_total)} AP this month is a new personal best for you.`,
+        `You are outrunning your past self. That is what real growth looks like.`,
+        `Finish this month the way you started it — relentless. 🌟`,
+      ].join('\n'));
+    }
+  }
+
   await interaction.editReply({
-    content: `Sale logged! ${formatMoney(premium)} AP. Monthly: ${formatMoney(stats?.monthly_total)} - ${newRank.emoji} ${newRank.name}`,
+    content: [
+      `✅ Sale logged! ${formatMoney(premium)} AP`,
+      `📊 Monthly: ${formatMoney(stats?.monthly_total)} · ${newRank.emoji} ${newRank.name}`,
+      ...(personalBests.length ? [``, ...personalBests] : []),
+    ].join('\n'),
   });
 }
 
@@ -547,6 +630,7 @@ function scheduleLeaderboards(client) {
     if (hour === 0 && min === 0 && !lastPosted[key('reset-challenges')]) {
       lastPosted[key('reset-challenges')] = true;
       firedMomentumThresholds.clear();
+      firedRecordWatch = false;
       try { await expireChallenges(); } catch (err) { console.error('Challenge reset error:', err.message); }
     }
 

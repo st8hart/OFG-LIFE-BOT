@@ -9,6 +9,7 @@ const {
   teamGoalsCommand,
   editSaleCommand,
   myEditSaleCommand,
+  challengesCommand,
 } = require('./commands');
 
 const commands = [
@@ -20,6 +21,7 @@ const commands = [
   teamGoalsCommand,
   editSaleCommand,
   myEditSaleCommand,
+  challengesCommand,
 ].map(cmd => cmd.data.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
