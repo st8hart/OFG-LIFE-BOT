@@ -201,7 +201,7 @@ async function handleSaleModal(interaction) {
 
   await addSale({
     userId: interaction.user.id,
-    username: displayName,
+    username: displayName || String(interaction.user.id),
     clientName: product,
     policyType: product,
     premium, carrier,
