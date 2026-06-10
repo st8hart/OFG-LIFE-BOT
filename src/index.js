@@ -6,7 +6,7 @@ const {
   getUserTotalSales, getDailySalesCount, getTeamDailySalesCount, getMonthlyTopSale,
   getActiveChallenge, expireChallenges,
   determineChallengeWinners, getPendingChallengeResults, clearPendingChallengeResults, getAllAgentFirstSales,
-  getChallengeStandings, getActiveChallenges,
+  getChallengeStandings,
   getMonthlyChampion, getWeeklyMVP,
   getAllTimeRecords, setAllTimeRecord, getMonthlyRecords,
   getUserDailyTotal, getUserWeeklyTotal,
@@ -62,6 +62,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
+// ── Daily sale milestone system ───────────────────────────────────────────────
+function getSalesMilestone(count) {
+  if (count >= 8) return `🌌 SUPERNOVA — ${count} SALES TODAY! 🌌`;
+  if (count === 7) return `🌋 VOLCANIC FIRESTORM — 7 SALES TODAY! 🌋`;
+  if (count === 6) return `🌊 TIDAL WAVE OF AP — 6 SALES TODAY! 🌊`;
+  if (count === 5) return `⛈️ AP THUNDERSTORM — 5 SALES TODAY! ⛈️`;
+  if (count === 4) return `🍀 FOUR LEAF CLOVER — 4 SALES TODAY! 🍀`;
+  if (count === 3) return `🎩 HAT TRICK — 3 SALES TODAY! 🎩`;
+  if (count === 2) return `🔥 HEATING UP — 2 SALES TODAY! 🔥`;
+  return null;
+}
+
 async function handleSaleModal(interaction) {
   await interaction.deferReply({ ephemeral: true });
 
@@ -111,13 +123,15 @@ async function handleSaleModal(interaction) {
     try {
       const channel = await client.channels.fetch(salesChannelId);
 
+      const milestone = getSalesMilestone(dailyCount);
+
       // Main sale alert
-      const streakBadge = isHotStreak ? ' 🔥🔥🔥 HOT STREAK' : '';
       const embed = {
         color: 0xFF4500,
         description: [
-          `🚨🔥 SALE ALERT - ${displayName}${streakBadge} 🔥🚨`,
+          `🚨🔥 SALE ALERT - ${displayName} 🔥🚨`,
           ``,
+          ...(milestone ? [milestone, ``] : []),
           `🏢 Carrier: ${carrier}`,
           `💰 Product: ${product}`,
           `📞 Lead Type: ${leadType}`,
@@ -275,10 +289,9 @@ async function handleSaleModal(interaction) {
     }
   }
 
-  // Challenge updates — loop through ALL active challenges (user can have up to 3)
-  const challenges = await getActiveChallenges(interaction.user.id);
-  for (const challenge of challenges) {
-    if (!salesChannelId) break;
+  // Challenge update
+  const challenge = await getActiveChallenge(interaction.user.id);
+  if (challenge && salesChannelId) {
     try {
       const ch = await client.channels.fetch(salesChannelId);
       const isChallenger = challenge.challenger_id === interaction.user.id;
@@ -287,15 +300,12 @@ async function handleSaleModal(interaction) {
       const oppStats = await getUserStats(opponentId);
       const myTotal = myStats?.daily_total || 0;
       const oppTotal = oppStats?.daily_total || 0;
-      const tied = myTotal === oppTotal;
       const leading = myTotal > oppTotal;
       await ch.send([
         ``,
         `⚔️ CHALLENGE UPDATE`,
         `<@${interaction.user.id}>: ${formatMoney(myTotal)} vs <@${opponentId}>: ${formatMoney(oppTotal)}`,
-        tied    ? `It's TIED! Better close another one! 🔥` :
-        leading ? `<@${interaction.user.id}> is in the LEAD! 🔥` :
-                  `<@${opponentId}> is leading — time to close! 💪`,
+        leading ? `<@${interaction.user.id}> is in the LEAD! 🔥` : `<@${opponentId}> is leading - time to close! 💪`,
         ``,
       ].join('\n'));
     } catch (err) { console.error('Challenge update error:', err.message); }

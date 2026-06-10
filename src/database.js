@@ -564,8 +564,32 @@ async function getWeeklyMVP(prevWeek = false) {
   return Object.values(map).sort((a, b) => b.total - a.total)[0];
 }
 
+// Returns { userId: bestSingleDayCount } for the current month (Central Time).
+// Used to show persistent monthly milestone badges on all leaderboards.
+// Badge = highest sales count hit in any single day this month.
+async function getBestDailyBadgesMap() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const { data, error } = await supabase.from('sales')
+    .select('user_id, created_at')
+    .gte('created_at', start.toISOString());
+  if (error) return {};
+  // Group sales by user → date (Central Time), then find each user's max day
+  const dailyCounts = {};
+  for (const s of data) {
+    const date = new Date(s.created_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' });
+    if (!dailyCounts[s.user_id]) dailyCounts[s.user_id] = {};
+    dailyCounts[s.user_id][date] = (dailyCounts[s.user_id][date] || 0) + 1;
+  }
+  const bestMap = {};
+  for (const [userId, dates] of Object.entries(dailyCounts)) {
+    bestMap[userId] = Math.max(...Object.values(dates));
+  }
+  return bestMap;
+}
+
 module.exports = {
-  addSale, getLeaderboard, getMonthlyTotal, getMonthlyTotalsMap, getUserStats, getTeamStats,
+  addSale, getLeaderboard, getMonthlyTotal, getMonthlyTotalsMap, getBestDailyBadgesMap, getUserStats, getTeamStats,
   createChallenge, getActiveChallenge, getActiveChallenges, expireChallenges,
   getDailyChallengeCount, getDailyChallengeWith, updateChallengeRecord, getChallengeStandings,
   determineChallengeWinners, getPendingChallengeResults, clearPendingChallengeResults,

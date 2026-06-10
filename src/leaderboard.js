@@ -1,6 +1,6 @@
 // src/leaderboard.js
 const { EmbedBuilder } = require('discord.js');
-const { getLeaderboard, getMonthlyTotal, getMonthlyTotalsMap, getRankForAmount, getGoal } = require('./database');
+const { getLeaderboard, getMonthlyTotal, getMonthlyTotalsMap, getBestDailyBadgesMap, getRankForAmount, getGoal } = require('./database');
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 const PERIOD_COLORS = {
@@ -8,6 +8,17 @@ const PERIOD_COLORS = {
   weekly:  0x9B59B6,
   monthly: 0xF1C40F,
 };
+
+function getMilestoneEmoji(count) {
+  if (count >= 8) return ' 🌌';
+  if (count === 7) return ' 🌋';
+  if (count === 6) return ' 🌊';
+  if (count === 5) return ' ⛈️';
+  if (count === 4) return ' 🍀';
+  if (count === 3) return ' 🎩';
+  if (count === 2) return ' 🔥';
+  return '';
+}
 
 function buildProgressBar(current, goal, length = 20) {
   const pct = Math.min(current / goal, 1);
@@ -29,10 +40,9 @@ async function buildLeaderboardEmbed(period, prevWeek = false) {
   const monthlyTotal = await getMonthlyTotal();
   const currentGoal = await getGoal();
   const periodTotal = rows.reduce((sum, r) => sum + r.total, 0);
-
-  // Always use monthly production for rank badges so daily/weekly boards
-  // show the same badge as the monthly leaderboard.
   const monthlyMap = await getMonthlyTotalsMap();
+  // Best single-day count this month per user — milestone badge persists all month
+  const badgeMap = await getBestDailyBadgesMap();
 
   const monthName = new Date().toLocaleString('en-US', { month: 'long' }).toUpperCase();
   const year = new Date().getFullYear();
@@ -91,13 +101,13 @@ async function buildLeaderboardEmbed(period, prevWeek = false) {
   const top5 = rows.slice(0, 5);
   const rest = rows.slice(5);
 
-  // Check hot streaks (daily_count >= 3) — only on daily leaderboard
   let podiumText = '';
   top5.forEach((row, i) => {
     const rank = getRankForAmount(monthlyMap[row.user_id] || 0);
     const medal = MEDALS[i] || `#${i + 1}`;
     const streak = (period === 'daily' && row.sales_count >= 3) ? ' 🔥' : '';
-    podiumText += `${medal} <@${row.user_id}> — **${formatMoney(row.total)}**${streak} · ${rank.emoji} ${rank.name} *(${row.sales_count} sale${row.sales_count !== 1 ? 's' : ''})*\n`;
+    const milestone = getMilestoneEmoji(badgeMap[row.user_id] || 0);
+    podiumText += `${medal} <@${row.user_id}> — **${formatMoney(row.total)}**${streak} · ${rank.emoji}${milestone} *(${row.sales_count} sale${row.sales_count !== 1 ? 's' : ''})*\n`;
   });
 
   embed.addFields({ name: '─────────────────────', value: podiumText, inline: false });
@@ -107,9 +117,23 @@ async function buildLeaderboardEmbed(period, prevWeek = false) {
     rest.forEach((row, i) => {
       const rank = getRankForAmount(monthlyMap[row.user_id] || 0);
       const streak = (period === 'daily' && row.sales_count >= 3) ? ' 🔥' : '';
-      restText += `#${i + 6} <@${row.user_id}> — **${formatMoney(row.total)}**${streak} · ${rank.emoji} ${rank.name}\n`;
+      const milestone = getMilestoneEmoji(badgeMap[row.user_id] || 0);
+      restText += `#${i + 6} <@${row.user_id}> — **${formatMoney(row.total)}**${streak} · ${rank.emoji}${milestone}\n`;
     });
     embed.addFields({ name: '─────────────────────', value: restText, inline: false });
+  }
+
+  // Badge legend — monthly leaderboard only
+  if (period === 'monthly') {
+    embed.addFields({
+      name: '📊 Badge Guide',
+      value: [
+        `**Rank** · Based on monthly AP production`,
+        `**Milestone** · Based on sales count this period`,
+        `🔥 2 sales · 🎩 3 · 🍀 4 · ⛈️ 5 · 🌊 6 · 🌋 7 · 🌌 8+`,
+      ].join('\n'),
+      inline: false,
+    });
   }
 
   embed.setFooter({ text: 'OFG - Production Tracker' });
