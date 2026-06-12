@@ -225,21 +225,34 @@ async function getDailyChallengeWith(challengerId, challengeeId) {
 
 // Increment wins or losses for an agent in challenge_records
 async function updateChallengeRecord(userId, username, isWin) {
-  const { data: existing, error } = await supabase.from('challenge_records')
-    .select('*').eq('user_id', userId).single();
+  const { data: existing, error: selectError } = await supabase.from('challenge_records')
+    .select('*').eq('user_id', userId).maybeSingle();
+
+  if (selectError) {
+    console.error(`[challenge_records] select failed for ${userId} (${username}):`, selectError.message || selectError);
+    return;
+  }
+
   if (existing) {
-    await supabase.from('challenge_records').update({
+    const { error: updateError } = await supabase.from('challenge_records').update({
       username,
       wins:   existing.wins   + (isWin ? 1 : 0),
       losses: existing.losses + (isWin ? 0 : 1),
       updated_at: new Date().toISOString(),
     }).eq('user_id', userId);
+    if (updateError) {
+      console.error(`[challenge_records] update failed for ${userId} (${username}):`, updateError.message || updateError);
+    }
   } else {
-    await supabase.from('challenge_records').insert({
+    const { error: insertError } = await supabase.from('challenge_records').insert({
       user_id: userId, username,
       wins:   isWin ? 1 : 0,
       losses: isWin ? 0 : 1,
+      updated_at: new Date().toISOString(),
     });
+    if (insertError) {
+      console.error(`[challenge_records] insert failed for ${userId} (${username}):`, insertError.message || insertError);
+    }
   }
 }
 
@@ -247,7 +260,10 @@ async function updateChallengeRecord(userId, username, isWin) {
 async function getChallengeStandings() {
   const { data, error } = await supabase.from('challenge_records')
     .select('*').order('wins', { ascending: false });
-  if (error) return [];
+  if (error) {
+    console.error('[challenge_records] getChallengeStandings failed:', error.message || error);
+    return [];
+  }
   return data || [];
 }
 
@@ -481,7 +497,14 @@ async function expireChallenges() {
 // Call at 11:55pm — grabs daily totals BEFORE midnight reset, stores winner for morning announcement
 async function determineChallengeWinners() {
   const { data, error } = await supabase.from('challenges').select('*').eq('status', 'active');
-  if (error || !data || !data.length) return;
+  if (error) {
+    console.error('[challenges] determineChallengeWinners query failed:', error.message || error);
+    return;
+  }
+  if (!data || !data.length) {
+    console.log('[challenges] determineChallengeWinners: no active challenges found.');
+    return;
+  }
 
   const results = [];
   for (const challenge of data) {
@@ -507,13 +530,24 @@ async function determineChallengeWinners() {
   }
 
   if (results.length) {
-    await supabase.from('settings').upsert({ key: 'pending_challenge_results', value: JSON.stringify(results) });
+    const { error: upsertError } = await supabase.from('settings').upsert({ key: 'pending_challenge_results', value: JSON.stringify(results) });
+    if (upsertError) {
+      console.error('[challenges] failed to save pending_challenge_results:', upsertError.message || upsertError);
+    } else {
+      console.log(`[challenges] determineChallengeWinners: resolved ${results.length} challenge(s).`);
+    }
+  } else {
+    console.log('[challenges] determineChallengeWinners: active challenges found, but all had 0 sales for both sides — nothing to record.');
   }
 }
 
 async function getPendingChallengeResults() {
-  const { data, error } = await supabase.from('settings').select('value').eq('key', 'pending_challenge_results').single();
-  if (error || !data) return [];
+  const { data, error } = await supabase.from('settings').select('value').eq('key', 'pending_challenge_results').maybeSingle();
+  if (error) {
+    console.error('[challenges] getPendingChallengeResults failed:', error.message || error);
+    return [];
+  }
+  if (!data) return [];
   try { return JSON.parse(data.value); } catch { return []; }
 }
 

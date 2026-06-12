@@ -8,6 +8,7 @@ const {
   getUserStats, getRankForAmount, getRecentSales, deleteSale,
   adminDeleteSale, getGoal, setGoal, getTeamStats,
   getAllActiveChallenges, getUserDailyTotal,
+  determineChallengeWinners, getPendingChallengeResults, clearPendingChallengeResults,
 } = require('./database');
 const { buildLeaderboardEmbed, formatMoney } = require('./leaderboard');
 
@@ -555,6 +556,51 @@ const challengesCommand = {
   },
 };
 
+// ── /resolvechallenges (admin only, for testing) ────────────────────────────────
+// Manually runs the same logic that normally fires automatically at 11:55pm Central.
+// Tallies today's active challenges into challenge_records and queues results
+// for the 9:30am announcement. Check the bot's console logs for [challenges] /
+// [challenge_records] lines to see exactly what happened.
+const resolveChallengesCommand = {
+  data: new SlashCommandBuilder()
+    .setName('resolvechallenges')
+    .setDescription('Admin: manually resolve today\'s active challenges (for testing)'),
+  async execute(interaction) {
+    if (!interaction.member.permissions.has('ManageGuild')) {
+      return interaction.reply({ content: 'You need Admin permissions to use this.', ephemeral: true });
+    }
+    await interaction.deferReply({ ephemeral: true });
+    await determineChallengeWinners();
+    const pending = await getPendingChallengeResults();
+    if (!pending.length) {
+      return interaction.editReply({
+        content: 'Ran the resolver — no results were queued. Either there are no active challenges right now, or both participants in every active challenge have $0 in sales today. Check the console for `[challenges]` / `[challenge_records]` log lines for details.',
+      });
+    }
+    const summary = pending.map(r => {
+      if (r.tie) return `🤝 <@${r.winner.id}> vs <@${r.loser.id}> — tied at ${formatMoney(r.winner.total)}`;
+      return `🏆 <@${r.winner.id}> (${formatMoney(r.winner.total)}) beat <@${r.loser.id}> (${formatMoney(r.loser.total)})`;
+    }).join('\n');
+    await interaction.editReply({
+      content: `Resolved ${pending.length} challenge(s):\n${summary}\n\nThese are now queued and will post in the sales channel at 9:30am, and \`/standings\` should reflect the updated wins/losses now. Run \`/standings\` to check, then \`/clearpendingchallenges\` if you don't want the 9:30am announcement to fire for this test run.`,
+    });
+  },
+};
+
+// ── /clearpendingchallenges (admin only, for testing) ──────────────────────────
+const clearPendingChallengesCommand = {
+  data: new SlashCommandBuilder()
+    .setName('clearpendingchallenges')
+    .setDescription('Admin: clear queued challenge results so they don\'t post at 9:30am'),
+  async execute(interaction) {
+    if (!interaction.member.permissions.has('ManageGuild')) {
+      return interaction.reply({ content: 'You need Admin permissions to use this.', ephemeral: true });
+    }
+    await clearPendingChallengeResults();
+    await interaction.reply({ content: 'Cleared any pending challenge results.', ephemeral: true });
+  },
+};
+
 module.exports = {
   saleCommand, leaderboardCommand, myStatsCommand, teamStatsCommand,
   recentSalesCommand, deleteSaleCommand, removeSaleCommand, setGoalCommand,
@@ -562,4 +608,5 @@ module.exports = {
   myPersonalGoalCommand, teamGoalsCommand,
   editSaleCommand, myEditSaleCommand,
   challengesCommand,
+  resolveChallengesCommand, clearPendingChallengesCommand,
 };

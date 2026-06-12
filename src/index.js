@@ -24,6 +24,8 @@ const {
   editSaleCommand,
   myEditSaleCommand,
   challengesCommand,
+  resolveChallengesCommand,
+  clearPendingChallengesCommand,
 } = require('./commands');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -39,6 +41,8 @@ const commands = [
   editSaleCommand,
   myEditSaleCommand,
   challengesCommand,
+  resolveChallengesCommand,
+  clearPendingChallengesCommand,
 ];
 for (const cmd of commands) client.commands.set(cmd.data.name, cmd);
 
