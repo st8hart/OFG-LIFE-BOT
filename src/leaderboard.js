@@ -124,8 +124,7 @@ async function buildLeaderboardEmbed(period, prevWeek = false, prevDay = false) 
   embed.addFields({ name: '─────────────────────', value: podiumText, inline: false });
 
   if (rest.length > 0) {
-    let restText = '';
-    rest.forEach((row, i) => {
+    const restLines = rest.map((row, i) => {
       const rank        = getRankForAmount(monthlyMap[row.user_id] || 0);
       const milestone   = getMilestoneEmoji(badgeMap[row.user_id] || 0);
       const champ       = reigningChampId === row.user_id  ? '🎖️' : '';
@@ -135,9 +134,21 @@ async function buildLeaderboardEmbed(period, prevWeek = false, prevDay = false) 
       const newProd     = newProducerSet.has(row.user_id)  ? '🌱' : '';
       const highRoller  = highRollerSet.has(row.user_id)   ? '🐋' : '';
       const badges      = `${champ}${showstopper}${hotWeek}${earlyBird}${newProd}${highRoller}${milestone}`;
-      restText += `#${i + 6} <@${row.user_id}> — **${formatMoney(row.total)}** · ${rank.emoji}${badges}\n`;
+      return `#${i + 6} <@${row.user_id}> — **${formatMoney(row.total)}** · ${rank.emoji}${badges}\n`;
     });
-    embed.addFields({ name: '─────────────────────', value: restText, inline: false });
+
+    // Split into chunks that stay under Discord's 1024-char field limit
+    const chunks = [];
+    let current = '';
+    for (const line of restLines) {
+      if ((current + line).length > 1000) { chunks.push(current); current = line; }
+      else current += line;
+    }
+    if (current) chunks.push(current);
+
+    chunks.forEach((chunk, i) => {
+      embed.addFields({ name: i === 0 ? '─────────────────────' : '\u200b', value: chunk, inline: false });
+    });
   }
 
   // Badge legend — monthly leaderboard only
