@@ -266,15 +266,15 @@ async function getRecentSales(limit = 5) {
 }
 
 async function deleteSale(saleId, userId) {
-  const { error } = await supabase.from('sales').delete().eq('id', saleId).eq('user_id', userId);
+  const { data, error } = await supabase.from('sales').delete().eq('id', saleId).eq('user_id', userId).select();
   if (error) throw error;
-  return { changes: 1 };
+  return { changes: data ? data.length : 0 };
 }
 
 async function adminDeleteSale(saleId) {
-  const { error } = await supabase.from('sales').delete().eq('id', saleId);
+  const { data, error } = await supabase.from('sales').delete().eq('id', saleId).select();
   if (error) throw error;
-  return { changes: 1 };
+  return { changes: data ? data.length : 0 };
 }
 
 // ── Goal ──────────────────────────────────────────────────────────────────────

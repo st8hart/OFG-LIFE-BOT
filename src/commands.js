@@ -75,13 +75,14 @@ const leaderboardCommand = {
         { name: 'Monthly',   value: 'monthly' },
       )),
   async execute(interaction) {
+    await interaction.deferReply();
     const period = interaction.options.getString('period') || 'monthly';
     if (period === 'yesterday') {
       const embed = await buildLeaderboardEmbed('daily', false, true);
-      return interaction.reply({ embeds: [embed] });
+      return interaction.editReply({ embeds: [embed] });
     }
     const embed = await buildLeaderboardEmbed(period);
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   },
 };
 
@@ -175,7 +176,10 @@ const deleteSaleCommand = {
     .addIntegerOption(opt => opt.setName('id').setDescription('Sale ID from /recentsales').setRequired(true)),
   async execute(interaction) {
     const saleId = interaction.options.getInteger('id');
-    await deleteSale(saleId, interaction.user.id);
+    const result = await deleteSale(saleId, interaction.user.id);
+    if (result.changes === 0) {
+      return interaction.reply({ content: `Sale #${saleId} not found, or it isn't one of your sales.`, ephemeral: true });
+    }
     await interaction.reply({ content: `Sale #${saleId} deleted.`, ephemeral: true });
   },
 };
@@ -189,7 +193,10 @@ const removeSaleCommand = {
       return interaction.reply({ content: 'You need Admin permissions to use this.', ephemeral: true });
     }
     const saleId = interaction.options.getInteger('id');
-    await adminDeleteSale(saleId);
+    const result = await adminDeleteSale(saleId);
+    if (result.changes === 0) {
+      return interaction.reply({ content: `Sale #${saleId} not found — nothing was deleted.`, ephemeral: true });
+    }
     await interaction.reply({ content: `Sale #${saleId} removed by admin.`, ephemeral: true });
   },
 };
