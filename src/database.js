@@ -773,7 +773,68 @@ async function getShowstopperId() {
   return data[0].user_id;
 }
 
+// ── Team hierarchy (Supabase-backed, live source of truth) ──────────────────────
+const { createTree } = require('./team-logic');
+
+async function getTeamMembersRaw() {
+  const { data, error } = await supabase.from('team_members').select('*');
+  if (error) { console.error('[team_members] load failed:', error.message || error); return []; }
+  return data || [];
+}
+
+// Loads the live hierarchy from Supabase and returns a tree with all the helper
+// methods (baseShopLeaders, getBaseShopOwner, masterLeaders, isAncestor, ...).
+async function getTeamTree() {
+  const rows = await getTeamMembersRaw();
+  const map = {};
+  for (const r of rows) {
+    map[r.user_id] = {
+      name: r.name || r.user_id,
+      upline: r.upline_id || null,
+      baseShop: !!r.base_shop,
+      virtual: !!r.is_virtual,
+      ...((r.is_master === null || r.is_master === undefined) ? {} : { master: r.is_master }),
+    };
+  }
+  // Always guarantee the combined agency grouping node exists.
+  if (!map['OVERALL_AGENCY']) {
+    map['OVERALL_AGENCY'] = { name: 'Overall Agency', upline: null, virtual: true, master: true };
+  }
+  return createTree(map);
+}
+
+// Read-merge-write so partial edits never clobber other fields.
+async function upsertTeamMember(fields) {
+  const userId = fields.userId;
+  const { data: existing } = await supabase.from('team_members').select('*').eq('user_id', userId).maybeSingle();
+  const row = {
+    user_id:    userId,
+    name:       fields.name      !== undefined ? fields.name      : (existing ? existing.name      : userId),
+    upline_id:  fields.uplineId  !== undefined ? fields.uplineId  : (existing ? existing.upline_id : null),
+    base_shop:  fields.baseShop  !== undefined ? fields.baseShop  : (existing ? existing.base_shop : false),
+    is_master:  fields.isMaster  !== undefined ? fields.isMaster  : (existing ? existing.is_master : null),
+    is_virtual: fields.isVirtual !== undefined ? fields.isVirtual : (existing ? existing.is_virtual : false),
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await supabase.from('team_members').upsert(row, { onConflict: 'user_id' });
+  if (error) throw error;
+  return row;
+}
+
+async function removeTeamMember(userId) {
+  const { error } = await supabase.from('team_members').delete().eq('user_id', userId);
+  if (error) throw error;
+}
+
+async function ensureAgencyNode(name) {
+  const { data } = await supabase.from('team_members').select('user_id').eq('user_id', 'OVERALL_AGENCY').maybeSingle();
+  if (!data) {
+    await upsertTeamMember({ userId: 'OVERALL_AGENCY', name: name || 'Overall Agency', uplineId: null, baseShop: false, isMaster: true, isVirtual: true });
+  }
+}
+
 module.exports = {
+  getTeamTree, getTeamMembersRaw, upsertTeamMember, removeTeamMember, ensureAgencyNode,
   addSale, getLeaderboard, getMonthlyTotal, getMonthlyTotalsMap, getBestDailyBadgesMap, getUserStats, getTeamStats,
   getTeamDailyTotal, getHotWeekBadgesSet, getYesterdayStart,
   getNewProducerSet, getEarlyBirdSet, getHighRollerSet, getReigningChampionId, getShowstopperId, getPersonalBestSale,

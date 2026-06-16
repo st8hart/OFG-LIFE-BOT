@@ -13,6 +13,7 @@ const {
   resolveChallengesCommand,
   clearPendingChallengesCommand,
 } = require('./commands');
+const { teamLeaderboardCommand, teamAssignCommand, teamRemoveCommand, teamSetupCommand } = require('./team-leaderboard');
 
 const commands = [
   saleCommand, leaderboardCommand, myStatsCommand, teamStatsCommand,
@@ -26,6 +27,10 @@ const commands = [
   challengesCommand,
   resolveChallengesCommand,
   clearPendingChallengesCommand,
+  teamLeaderboardCommand,
+  teamAssignCommand,
+  teamRemoveCommand,
+  teamSetupCommand,
 ].map(cmd => cmd.data.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);

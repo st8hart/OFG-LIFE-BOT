@@ -27,6 +27,7 @@ const {
   resolveChallengesCommand,
   clearPendingChallengesCommand,
 } = require('./commands');
+const { buildTeamLeaderboardEmbed, teamLeaderboardCommand, teamAssignCommand, teamRemoveCommand, teamSetupCommand } = require('./team-leaderboard');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
@@ -43,6 +44,10 @@ const commands = [
   challengesCommand,
   resolveChallengesCommand,
   clearPendingChallengesCommand,
+  teamLeaderboardCommand,
+  teamAssignCommand,
+  teamRemoveCommand,
+  teamSetupCommand,
 ];
 for (const cmd of commands) client.commands.set(cmd.data.name, cmd);
 
@@ -575,6 +580,19 @@ function scheduleLeaderboards(client) {
     } catch (err) { console.error('Final leaderboard error:', err.message); }
   };
 
+  // Team / leadership leaderboard poster. Uses TEAM_LEADERBOARD_CHANNEL_ID if set,
+  // otherwise falls back to the same channel as the producer boards.
+  const postTeamLeaderboard = async (period, intro = null, prevWeek = false, prevDay = false, final = false) => {
+    const channelId = process.env.TEAM_LEADERBOARD_CHANNEL_ID || process.env.LEADERBOARD_CHANNEL_ID;
+    if (!channelId) return;
+    try {
+      const channel = await client.channels.fetch(channelId);
+      const embed = await buildTeamLeaderboardEmbed(period, prevWeek, prevDay);
+      if (final) embed.setColor(0xFFD700);
+      await channel.send(intro ? { content: intro, embeds: [embed] } : { embeds: [embed] });
+    } catch (err) { console.error('Team leaderboard error:', err.message); }
+  };
+
   // Daily every 2hrs 12pm-midnight Central
   setInterval(() => {
     const hour = getCentralHour();
@@ -847,6 +865,43 @@ function scheduleLeaderboards(client) {
         `New month. Fresh start. New goals. Lets make it even bigger!`,
         ``,
       ].join('\n'));
+    }
+
+    // ── TEAM / LEADERSHIP LEADERBOARDS ──────────────────────────────────────────
+    // Intraday team board — 1pm / 5pm / 9pm Central (in the gaps the producer board leaves)
+    if ([13, 17, 21].includes(hour) && min === 0 && !lastPosted[key('team-daily')]) {
+      lastPosted[key('team-daily')] = true;
+      postTeamLeaderboard('daily');
+    }
+
+    // Team daily recap — 8:02am, 2 min after producer final daily (skips Monday, like producer)
+    if (hour === 8 && min === 2 && day !== 1 && !lastPosted[key('team-final-daily')]) {
+      lastPosted[key('team-final-daily')] = true;
+      postTeamLeaderboard('daily', `🏪 **OFG TEAM RECAP — YESTERDAY'S RESULTS** 🏪`, false, true, true);
+    }
+
+    // Team weekly — 9:02am, 2 min after producer weekly (not Monday)
+    if (hour === 9 && min === 2 && day !== 1 && !lastPosted[key('team-weekly')]) {
+      lastPosted[key('team-weekly')] = true;
+      postTeamLeaderboard('weekly');
+    }
+
+    // Team final weekly — Monday 8:02am, 2 min after producer final weekly
+    if (day === 1 && hour === 8 && min === 2 && !lastPosted[key('team-final-weekly')]) {
+      lastPosted[key('team-final-weekly')] = true;
+      postTeamLeaderboard('weekly', `🏪 **OFG TEAM RECAP — LAST WEEK LOCKED IN** 🏪`, true, false, true);
+    }
+
+    // Team monthly — Mon/Wed/Fri 10:02am, 2 min after producer monthly
+    if ((day === 1 || day === 3 || day === 5) && hour === 10 && min === 2 && !lastPosted[key('team-monthly')]) {
+      lastPosted[key('team-monthly')] = true;
+      postTeamLeaderboard('monthly');
+    }
+
+    // Team final monthly — 1st at 8:02am, 2 min after producer final monthly
+    if (now.getDate() === 1 && hour === 8 && min === 2 && !lastPosted[key('team-final-monthly')]) {
+      lastPosted[key('team-final-monthly')] = true;
+      postTeamLeaderboard('monthly', `🏛️ **OFG TEAM RECAP — THE MONTH IS CLOSED** 🏛️`, false, false, true);
     }
 
   }, 60 * 1000);
