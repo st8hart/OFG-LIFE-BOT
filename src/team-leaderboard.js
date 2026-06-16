@@ -74,6 +74,7 @@ async function buildTeamLeaderboardEmbed(period, prevWeek = false, prevDay = fal
   const rows = await getLeaderboard(period, prevWeek, prevDay);
   const personal = {};
   for (const r of rows) personal[r.user_id] = (personal[r.user_id] || 0) + r.total;
+  const periodTotal = Object.values(personal).reduce((s, v) => s + v, 0);
 
   const baseEntries   = rollupBaseShop(tree, personal);
   const masterEntries = rollupMaster(tree, personal);
@@ -82,18 +83,47 @@ async function buildTeamLeaderboardEmbed(period, prevWeek = false, prevDay = fal
   const year = new Date().getFullYear();
 
   let title = '';
-  if (period === 'daily')   title = prevDay  ? `🏪 OFG TEAM LEADERBOARD — YESTERDAY`  : `🏪 OFG TEAM LEADERBOARD — TODAY`;
-  if (period === 'weekly')  title = prevWeek ? `🏪 OFG TEAM LEADERBOARD — LAST WEEK`  : `🏪 OFG TEAM LEADERBOARD — THIS WEEK`;
-  if (period === 'monthly') title = `🏛️ OFG TEAM LEADERBOARD — ${monthName} ${year}`;
+  if (period === 'daily')   title = prevDay  ? `👑 OFG TEAM LEADERBOARD — YESTERDAY`  : `👑 OFG TEAM LEADERBOARD — TODAY`;
+  if (period === 'weekly')  title = prevWeek ? `👑 OFG TEAM LEADERBOARD — LAST WEEK`  : `👑 OFG TEAM LEADERBOARD — THIS WEEK`;
+  if (period === 'monthly') title = `👑 OFG TEAM LEADERBOARD — ${monthName} ${year}`;
 
   const embed = new EmbedBuilder().setColor(PERIOD_COLORS[period] || 0xF1C40F).setTitle(title).setTimestamp();
 
-  if (period === 'monthly') {
-    const monthlyTotal = await getMonthlyTotal();
-    const goal = await getGoal();
+  // Summary header — period total + agency (monthly) total + goal, like the producer boards
+  const monthlyTotal = await getMonthlyTotal();
+  const goal = await getGoal();
+  if (period === 'daily') {
+    embed.addFields({
+      name: prevDay ? '📅 Yesterday at a Glance' : '📅 Today at a Glance',
+      value: [
+        `**Daily Total: ${formatMoney(periodTotal)}**`,
+        ``,
+        `🏆 Monthly Team Total: ${formatMoney(monthlyTotal)}`,
+        `🎯 Monthly Goal: ${formatMoney(goal)}`,
+        buildProgressBar(monthlyTotal, goal),
+      ].join('\n'),
+      inline: false,
+    });
+  } else if (period === 'weekly') {
+    embed.addFields({
+      name: prevWeek ? '📆 Last Week at a Glance' : '📆 This Week at a Glance',
+      value: [
+        `**Weekly Total: ${formatMoney(periodTotal)}**`,
+        ``,
+        `🏆 Monthly Team Total: ${formatMoney(monthlyTotal)}`,
+        `🎯 Monthly Goal: ${formatMoney(goal)}`,
+        buildProgressBar(monthlyTotal, goal),
+      ].join('\n'),
+      inline: false,
+    });
+  } else if (period === 'monthly') {
     embed.addFields({
       name: '📊 Agency Total',
-      value: [`**${formatMoney(monthlyTotal)}**`, `🎯 Goal: ${formatMoney(goal)}`, buildProgressBar(monthlyTotal, goal)].join('\n'),
+      value: [
+        `**Team Total: ${formatMoney(monthlyTotal)}**`,
+        `🎯 Goal: ${formatMoney(goal)}`,
+        buildProgressBar(monthlyTotal, goal),
+      ].join('\n'),
       inline: false,
     });
   }
@@ -104,10 +134,13 @@ async function buildTeamLeaderboardEmbed(period, prevWeek = false, prevDay = fal
   } else {
     embed.addFields({ name: '🏛️ Master Agency Leaderboard', value: '*No production logged yet for this period.*', inline: false });
   }
+  // Visual divider between the Master Agency and Base Shop sections (same message)
+  embed.addFields({ name: '\u200b', value: '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', inline: false });
+
   if (baseEntries.length) {
-    for (const f of chunkFields(rankLines(tree, baseEntries), '🏪 Base Shop Leaderboard')) embed.addFields(f);
+    for (const f of chunkFields(rankLines(tree, baseEntries), '🏢 Base Shop Leaderboard')) embed.addFields(f);
   } else {
-    embed.addFields({ name: '🏪 Base Shop Leaderboard', value: '*No production logged yet for this period.*', inline: false });
+    embed.addFields({ name: '🏢 Base Shop Leaderboard', value: '*No production logged yet for this period.*', inline: false });
   }
 
   embed.setFooter({ text: 'OFG - Leadership Tracker' });
