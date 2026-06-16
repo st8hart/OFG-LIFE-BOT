@@ -1,6 +1,6 @@
 // src/index.js
 require('dotenv').config();
-const { Client, GatewayIntentBits, Events, Collection } = require('discord.js');
+const { Client, GatewayIntentBits, Events, Collection, REST, Routes } = require('discord.js');
 const {
   addSale, getUserStats, getRankForAmount, getMonthlyTotal, getGoal, setGoal, getTeamStats,
   getUserTotalSales, getDailySalesCount, getTeamDailySalesCount, getMonthlyTopSale, getPersonalBestSale,
@@ -51,8 +51,23 @@ const commands = [
 ];
 for (const cmd of commands) client.commands.set(cmd.data.name, cmd);
 
-client.once(Events.ClientReady, (c) => {
+client.once(Events.ClientReady, async (c) => {
   console.log(`OFG Bot online as ${c.user.tag}`);
+  // Auto-register slash commands on every startup, so new commands appear after a
+  // deploy without needing to run deploy-commands.js by hand. Idempotent — Discord
+  // just overwrites the existing guild command list each time.
+  try {
+    if (process.env.CLIENT_ID && process.env.GUILD_ID) {
+      const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+      const body = commands.map(cmd => cmd.data.toJSON());
+      await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), { body });
+      console.log(`Registered ${body.length} slash commands`);
+    } else {
+      console.warn('CLIENT_ID / GUILD_ID not set — skipping auto command registration.');
+    }
+  } catch (err) {
+    console.error('Command auto-registration failed:', err.message);
+  }
   scheduleLeaderboards(client);
 });
 
