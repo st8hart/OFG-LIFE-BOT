@@ -2,7 +2,7 @@
 const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
 const {
   getLeaderboard, getMonthlyTotal, getGoal,
-  getTeamTree, upsertTeamMember, removeTeamMember, ensureAgencyNode,
+  getTeamTree, upsertTeamMember, removeTeamMember, ensureAgencyNode, removeUnassignedProducer,
 } = require('./database');
 
 const MEDALS = ['🥇', '🥈', '🥉'];
@@ -239,6 +239,7 @@ const teamAssignCommand = {
     }
 
     await upsertTeamMember({ userId: member.id, name: memberName, uplineId, baseShop });
+    await removeUnassignedProducer(member.id); // they're placed now — clear from the pending queue
     await interaction.editReply({
       content: `✅ ${memberName} placed ${leaderNote}, ${baseShop ? 'WITH their own base shop' : 'as a producer'}.\nRun \`/teamsetup\` to see the full tree.`,
     });

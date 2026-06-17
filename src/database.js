@@ -833,8 +833,28 @@ async function ensureAgencyNode(name) {
   }
 }
 
+// ── Unassigned producers queue (profile saved when an unplaced person logs a deal) ──
+async function recordUnassignedProducer({ userId, name, avatarUrl }) {
+  const { data: existing } = await supabase.from('unassigned_producers').select('deal_count').eq('user_id', userId).maybeSingle();
+  const row = {
+    user_id: userId,
+    name: name || userId,
+    avatar_url: avatarUrl || null,
+    last_deal_at: new Date().toISOString(),
+    deal_count: ((existing && existing.deal_count) || 0) + 1,
+  };
+  const { error } = await supabase.from('unassigned_producers').upsert(row, { onConflict: 'user_id' });
+  if (error) throw error;
+}
+
+async function removeUnassignedProducer(userId) {
+  const { error } = await supabase.from('unassigned_producers').delete().eq('user_id', userId);
+  if (error) console.error('[unassigned_producers] remove failed:', error.message || error);
+}
+
 module.exports = {
   getTeamTree, getTeamMembersRaw, upsertTeamMember, removeTeamMember, ensureAgencyNode,
+  recordUnassignedProducer, removeUnassignedProducer,
   addSale, getLeaderboard, getMonthlyTotal, getMonthlyTotalsMap, getBestDailyBadgesMap, getUserStats, getTeamStats,
   getTeamDailyTotal, getHotWeekBadgesSet, getYesterdayStart,
   getNewProducerSet, getEarlyBirdSet, getHighRollerSet, getReigningChampionId, getShowstopperId, getPersonalBestSale,

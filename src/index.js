@@ -1,6 +1,6 @@
 // src/index.js
 require('dotenv').config();
-const { Client, GatewayIntentBits, Events, Collection, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, Events, Collection, REST, Routes, EmbedBuilder } = require('discord.js');
 const {
   addSale, getUserStats, getRankForAmount, getMonthlyTotal, getGoal, setGoal, getTeamStats,
   getUserTotalSales, getDailySalesCount, getTeamDailySalesCount, getMonthlyTopSale, getPersonalBestSale,
@@ -11,7 +11,7 @@ const {
   getAllTimeRecords, setAllTimeRecord, getMonthlyRecords,
   getUserDailyTotal, getUserWeeklyTotal,
   getTeamDailyTotal,
-  getTeamTree,
+  getTeamTree, recordUnassignedProducer,
 } = require('./database');
 const { buildLeaderboardEmbed, formatMoney } = require('./leaderboard');
 const {
@@ -240,30 +240,50 @@ async function handleSaleModal(interaction) {
   // Alert leadership if this seller isn't placed under a base shop / leader yet.
   try {
     const tree = await getTeamTree();
-    if (!tree.getBaseShopOwner(interaction.user.id) && !alertedUnassigned.has(interaction.user.id)) {
-      alertedUnassigned.add(interaction.user.id);
-      const msg =
-        `⚠️ **Unassigned producer:** <@${interaction.user.id}> (${displayName}) just logged a deal but isn't ` +
-        `placed under a base shop or leader yet. Run \`/teamassign\` so their production rolls up to the right team.`;
+    if (!tree.getBaseShopOwner(interaction.user.id)) {
+      const avatarUrl = interaction.user.displayAvatarURL({ extension: 'png', size: 256 });
 
-      const dmIds = (process.env.TEAM_ALERT_DM_USER_IDS || '')
-        .split(',').map(s => s.trim()).filter(Boolean);
+      // Save / update their profile in Supabase so there's a record to act on.
+      try {
+        await recordUnassignedProducer({ userId: interaction.user.id, name: displayName, avatarUrl });
+      } catch (e) { console.error('recordUnassignedProducer failed:', e.message); }
 
-      if (dmIds.length) {
-        // Private DM to each configured leader.
-        for (const uid of dmIds) {
-          try {
-            const u = await client.users.fetch(uid);
-            await u.send(msg);
-          } catch (e) { console.error(`Could not DM ${uid} (DMs off or bad id?):`, e.message); }
-        }
-      } else {
-        // Fallback: post in a channel if no DM recipients are configured.
-        const alertChannelId = process.env.TEAM_ALERT_CHANNEL_ID || process.env.SALES_CHANNEL_ID || process.env.LEADERBOARD_CHANNEL_ID;
-        if (alertChannelId) {
-          const alertChannel = await client.channels.fetch(alertChannelId);
-          const rolePing = process.env.TEAM_ALERT_ROLE_ID ? `<@&${process.env.TEAM_ALERT_ROLE_ID}> ` : '';
-          await alertChannel.send(rolePing + msg);
+      // DM the leaders (once per session) with a nice card.
+      if (!alertedUnassigned.has(interaction.user.id)) {
+        alertedUnassigned.add(interaction.user.id);
+
+        const alertEmbed = new EmbedBuilder()
+          .setColor(0xE74C3C)
+          .setTitle('🚦 New Producer Needs a Team')
+          .setThumbnail(avatarUrl)
+          .setDescription(`**${displayName}** just logged a deal but isn't placed under a base shop or leader yet. Let's get them assigned so their production rolls up to the right team. 💪`)
+          .addFields(
+            { name: '👤 Name', value: displayName, inline: true },
+            { name: '🆔 Discord ID', value: `\`${interaction.user.id}\``, inline: true },
+            { name: '👋 Mention', value: `<@${interaction.user.id}>`, inline: true },
+            { name: '💵 Deal Logged', value: `${formatMoney(premium)}${carrier ? ' · ' + carrier : ''}`, inline: false },
+            { name: '✅ Next Step', value: 'Run `/teamassign` to drop them under a **base shop** and a **leader**.', inline: false },
+          )
+          .setFooter({ text: 'OFG - Leadership Tracker' })
+          .setTimestamp();
+
+        const dmIds = (process.env.TEAM_ALERT_DM_USER_IDS || '')
+          .split(',').map(s => s.trim()).filter(Boolean);
+
+        if (dmIds.length) {
+          for (const uid of dmIds) {
+            try {
+              const u = await client.users.fetch(uid);
+              await u.send({ embeds: [alertEmbed] });
+            } catch (e) { console.error(`Could not DM ${uid} (DMs off or bad id?):`, e.message); }
+          }
+        } else {
+          const alertChannelId = process.env.TEAM_ALERT_CHANNEL_ID || process.env.SALES_CHANNEL_ID || process.env.LEADERBOARD_CHANNEL_ID;
+          if (alertChannelId) {
+            const alertChannel = await client.channels.fetch(alertChannelId);
+            const rolePing = process.env.TEAM_ALERT_ROLE_ID ? `<@&${process.env.TEAM_ALERT_ROLE_ID}> ` : '';
+            await alertChannel.send({ content: rolePing || undefined, embeds: [alertEmbed] });
+          }
         }
       }
     }
