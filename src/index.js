@@ -11,6 +11,7 @@ const {
   getAllTimeRecords, setAllTimeRecord, getMonthlyRecords,
   getUserDailyTotal, getUserWeeklyTotal,
   getTeamDailyTotal,
+  getTeamTree,
 } = require('./database');
 const { buildLeaderboardEmbed, formatMoney } = require('./leaderboard');
 const {
@@ -30,6 +31,10 @@ const {
 const { buildTeamLeaderboardEmbed, teamLeaderboardCommand, teamAssignCommand, teamRemoveCommand, teamSetupCommand } = require('./team-leaderboard');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+// Tracks producers we've already alerted about being unassigned (per bot session),
+// so logging several deals while unplaced doesn't spam the channel.
+const alertedUnassigned = new Set();
 
 client.commands = new Collection();
 const commands = [
@@ -231,6 +236,38 @@ async function handleSaleModal(interaction) {
     premium, carrier,
     notes: `Lead: ${leadType} | Presentation: ${presentationType}`,
   });
+
+  // Alert leadership if this seller isn't placed under a base shop / leader yet.
+  try {
+    const tree = await getTeamTree();
+    if (!tree.getBaseShopOwner(interaction.user.id) && !alertedUnassigned.has(interaction.user.id)) {
+      alertedUnassigned.add(interaction.user.id);
+      const msg =
+        `⚠️ **Unassigned producer:** <@${interaction.user.id}> (${displayName}) just logged a deal but isn't ` +
+        `placed under a base shop or leader yet. Run \`/teamassign\` so their production rolls up to the right team.`;
+
+      const dmIds = (process.env.TEAM_ALERT_DM_USER_IDS || '')
+        .split(',').map(s => s.trim()).filter(Boolean);
+
+      if (dmIds.length) {
+        // Private DM to each configured leader.
+        for (const uid of dmIds) {
+          try {
+            const u = await client.users.fetch(uid);
+            await u.send(msg);
+          } catch (e) { console.error(`Could not DM ${uid} (DMs off or bad id?):`, e.message); }
+        }
+      } else {
+        // Fallback: post in a channel if no DM recipients are configured.
+        const alertChannelId = process.env.TEAM_ALERT_CHANNEL_ID || process.env.SALES_CHANNEL_ID || process.env.LEADERBOARD_CHANNEL_ID;
+        if (alertChannelId) {
+          const alertChannel = await client.channels.fetch(alertChannelId);
+          const rolePing = process.env.TEAM_ALERT_ROLE_ID ? `<@&${process.env.TEAM_ALERT_ROLE_ID}> ` : '';
+          await alertChannel.send(rolePing + msg);
+        }
+      }
+    }
+  } catch (err) { console.error('Unassigned-producer alert failed:', err.message); }
 
   const stats = await getUserStats(interaction.user.id);
   const prevMonthlyTotal = (stats?.monthly_total || 0) - premium;
