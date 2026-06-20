@@ -981,18 +981,112 @@ async function getUserHireStats(recruiterId) {
   };
 }
 
+// Goal is month-aware so it auto-resets each month with no scheduled job:
+// stored as JSON {value, ym}. If the stored month isn't the current Central
+// month, we fall back to the base goal (100) — i.e. a fresh month starts at 100.
+function _centralYM() {
+  const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+function _baseHireGoal() {
+  return parseInt(process.env.MONTHLY_HIRE_GOAL || 100, 10);
+}
+
 async function getHireGoal() {
   const { data, error } = await supabase.from('settings').select('value').eq('key', 'monthly_hire_goal').single();
-  if (error || !data) return parseInt(process.env.MONTHLY_HIRE_GOAL || 100, 10);
-  return parseInt(data.value, 10);
+  if (error || !data) return _baseHireGoal();
+  let parsed = null;
+  try { parsed = JSON.parse(data.value); } catch (_) { parsed = null; }
+  if (parsed && parsed.ym) {
+    if (parsed.ym !== _centralYM()) return _baseHireGoal();   // new month → reset to base
+    return parseInt(parsed.value, 10) || _baseHireGoal();
+  }
+  // legacy plain-number value — treat as this month's goal
+  return parseInt(data.value, 10) || _baseHireGoal();
 }
 
 async function setHireGoal(count) {
-  await supabase.from('settings').upsert({ key: 'monthly_hire_goal', value: String(count) });
+  await supabase.from('settings').upsert({
+    key: 'monthly_hire_goal',
+    value: JSON.stringify({ value: count, ym: _centralYM() }),
+  });
+}
+
+// ── Recruiting ranks + badges ─────────────────────────────────────────────────
+function getRecruiterRanks() {
+  return [
+    { id: 1, name: 'Recruiter',        min: 0,   emoji: '🎯' },
+    { id: 2, name: 'Talent Scout',     min: 5,   emoji: '🧲' },
+    { id: 3, name: 'Builder',          min: 10,  emoji: '🏗️' },
+    { id: 4, name: 'Founder',          min: 25,  emoji: '🏰' },
+    { id: 5, name: 'Kingmaker',        min: 50,  emoji: '💪' },
+    { id: 6, name: 'Empire Architect', min: 100, emoji: '🌎' },
+  ];
+}
+function getRecruiterRankForCount(count) {
+  const ranks = getRecruiterRanks();
+  let cur = ranks[0];
+  for (const r of ranks) { if (count >= r.min) cur = r; else break; }
+  return cur;
+}
+
+// { recruiterId: monthly hire count } — drives rank badges + team-badge rollups.
+async function getMonthlyRecruitCountsMap(prevMonth = false) {
+  const now = new Date();
+  const start = prevMonth
+    ? new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    : new Date(now.getFullYear(), now.getMonth(), 1);
+  let q = supabase.from('hires').select('recruiter_id, created_at').gte('created_at', start.toISOString());
+  if (prevMonth) q = q.lt('created_at', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
+  const { data, error } = await q;
+  if (error) return {};
+  const m = {};
+  for (const h of data) m[h.recruiter_id] = (m[h.recruiter_id] || 0) + 1;
+  return m;
+}
+
+// 🎖️ Reigning Recruiter — last month's #1 recruiter, wears the badge all month.
+async function getReigningRecruiterId() {
+  const now = new Date();
+  const lmStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lmEnd   = new Date(now.getFullYear(), now.getMonth(), 1);
+  const { data, error } = await supabase.from('hires').select('recruiter_id')
+    .gte('created_at', lmStart.toISOString()).lt('created_at', lmEnd.toISOString());
+  if (error || !data.length) return null;
+  const m = {};
+  for (const h of data) m[h.recruiter_id] = (m[h.recruiter_id] || 0) + 1;
+  return Object.entries(m).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+}
+
+// { recruiterId: best single-day hire count this month } — for the best-day badge.
+async function getBestRecruitingDayMap() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const { data, error } = await supabase.from('hires').select('recruiter_id, created_at').gte('created_at', start.toISOString());
+  if (error) return {};
+  const perDay = {};
+  for (const h of data) {
+    const day = new Date(h.created_at).toLocaleDateString('en-US', { timeZone: 'America/Chicago' });
+    perDay[h.recruiter_id] = perDay[h.recruiter_id] || {};
+    perDay[h.recruiter_id][day] = (perDay[h.recruiter_id][day] || 0) + 1;
+  }
+  const best = {};
+  for (const [rid, days] of Object.entries(perDay)) best[rid] = Math.max(...Object.values(days));
+  return best;
+}
+
+// Hires this recruiter has logged TODAY (Central) — for the daily streak shoutout.
+async function getRecruiterDailyCount(recruiterId) {
+  const start = getDayStart();
+  const { data, error } = await supabase.from('hires').select('id')
+    .eq('recruiter_id', recruiterId).gte('created_at', start.toISOString());
+  if (error) return 0;
+  return data.length;
 }
 
 module.exports = {
   addHire, getHireLeaderboard, getHireSourceCounts, getMonthlyHireTotal, getUserHireStats, getHireGoal, setHireGoal,
+  getRecruiterRanks, getRecruiterRankForCount, getMonthlyRecruitCountsMap, getReigningRecruiterId, getBestRecruitingDayMap, getRecruiterDailyCount,
   getTeamTree, getTeamMembersRaw, upsertTeamMember, removeTeamMember, ensureAgencyNode,
   recordUnassignedProducer, removeUnassignedProducer,
   addSale, getLeaderboard, getMonthlyTotal, getMonthlyTotalsMap, getBestDailyBadgesMap, getUserStats, getTeamStats,

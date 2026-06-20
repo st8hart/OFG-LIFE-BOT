@@ -16,6 +16,7 @@ const {
 const {
   getTeamTree,
   addHire, getHireLeaderboard, getHireSourceCounts, getMonthlyHireTotal, getUserHireStats, getHireGoal, setHireGoal,
+  getRecruiterRankForCount, getMonthlyRecruitCountsMap, getReigningRecruiterId, getBestRecruitingDayMap, getRecruiterDailyCount,
 } = require('./database');
 const { buildBoardTitle } = require('./board-titles');
 
@@ -53,6 +54,33 @@ function formatHires(n) {
   return `${n} hire${n === 1 ? '' : 's'}`;
 }
 
+// ── Recruiting badges (all emoji swappable here) ──────────────────────────────
+// Best single-day hire count this month → a flair next to the recruiter.
+function bestDayEmoji(count) {
+  if (count >= 10) return '🌌';
+  if (count >= 7)  return '⚡';
+  if (count >= 5)  return '💥';
+  if (count >= 3)  return '⭐';
+  return '';
+}
+// Team badge by MONTHLY hires — shown on base shop & master agency lines.
+function teamBadgeEmoji(monthlyHires) {
+  if (monthlyHires >= 500) return '🌌';
+  if (monthlyHires >= 400) return '⚡';
+  if (monthlyHires >= 300) return '🔥';
+  if (monthlyHires >= 200) return '💫';
+  if (monthlyHires >= 100) return '🌟';
+  if (monthlyHires >= 50)  return '⭐';
+  if (monthlyHires >= 25)  return '✨';
+  return '';
+}
+// Daily streak shoutout tiers (3+ hires in a day) — escalating emoji.
+function dailyStreakMilestone(count) {
+  if (count < 3) return null;
+  const emoji = count >= 10 ? '🌌' : count >= 7 ? '⚡' : count >= 5 ? '💥' : '⭐';
+  return { emoji, count };
+}
+
 // @mention real Discord ids; show the stored name for virtual/grouping nodes.
 function label(tree, id) {
   if (/^\d{5,}$/.test(id)) return `<@${id}>`;
@@ -79,17 +107,26 @@ function chunkFields(lines, headerName) {
   return chunks.map((value, i) => ({ name: i === 0 ? headerName : '\u200b', value, inline: false }));
 }
 
-function rankLines(tree, entries) {
+// Team lines (master agency / base shop). monthlyTotals maps id → monthly hires
+// so the escalating team badge reflects the MONTH, not just the shown period.
+function rankLines(tree, entries, monthlyTotals = {}) {
   return entries.map((e, i) => {
     const medal = MEDALS[i] || `#${i + 1}`;
-    return `${medal} ${label(tree, e.id)} — **${formatHires(e.total)}**`;
+    const badge = teamBadgeEmoji(monthlyTotals[e.id] || 0);
+    return `${medal} ${label(tree, e.id)} — **${formatHires(e.total)}**${badge ? ' ' + badge : ''}`;
   });
 }
 
-function topRecruiterLines(rows) {
+// Top Recruiters. Rank emoji + 🎖️ reigning + best-day flair all key off MONTHLY
+// numbers (passed in), so a daily/weekly board still shows the recruiter's standing.
+function topRecruiterLines(rows, monthlyMap = {}, reigningId = null, bestDayMap = {}) {
   return rows.map((e, i) => {
     const medal = MEDALS[i] || `#${i + 1}`;
-    return `${medal} <@${e.recruiter_id}> — **${formatHires(e.count)}**`;
+    const rank  = getRecruiterRankForCount(monthlyMap[e.recruiter_id] || 0);
+    const reign = reigningId && reigningId === e.recruiter_id ? '🎖️' : '';
+    const best  = bestDayEmoji(bestDayMap[e.recruiter_id] || 0);
+    const flair = `${rank.emoji}${reign}${best}`;
+    return `${medal} <@${e.recruiter_id}> — **${formatHires(e.count)}** ${flair}`;
   });
 }
 
@@ -153,6 +190,20 @@ async function buildRecruitingLeaderboardEmbed(period, prevWeek = false, prevDay
   const baseEntries   = rollupBaseShop(tree, personal);
   const masterEntries = rollupMaster(tree, personal);
 
+  // Monthly numbers drive every badge (rank, team badge, reigning, best-day) so the
+  // flair is consistent across daily/weekly/monthly boards. Historical (prev*) views
+  // suppress reigning + best-day, matching how the production board behaves.
+  const historical = prevWeek || prevDay || prevMonth;
+  const monthlyMap = await getMonthlyRecruitCountsMap(prevMonth);
+  const reigningId = historical ? null : await getReigningRecruiterId();
+  const bestDayMap = historical ? {} : await getBestRecruitingDayMap();
+
+  // Roll the monthly personal map up the same tree so team lines show a monthly badge.
+  const monthlyBase = {};
+  for (const e of rollupBaseShop(tree, monthlyMap)) monthlyBase[e.id] = e.total;
+  const monthlyMaster = {};
+  for (const e of rollupMaster(tree, monthlyMap)) monthlyMaster[e.id] = e.total;
+
   const title = buildBoardTitle('recruiting', period, prevWeek, prevDay, prevMonth);
 
   const embed = new EmbedBuilder().setColor(PERIOD_COLORS[period] || CARD_COLOR).setTitle(title).setTimestamp();
@@ -205,7 +256,7 @@ async function buildRecruitingLeaderboardEmbed(period, prevWeek = false, prevDay
 
   // Top Recruiters (individual)
   if (rows.length) {
-    for (const f of chunkFields(topRecruiterLines(rows), '🏆 Top Recruiters')) embed.addFields(f);
+    for (const f of chunkFields(topRecruiterLines(rows, monthlyMap, reigningId, bestDayMap), '🏆 Top Recruiters')) embed.addFields(f);
   } else {
     embed.addFields({ name: '🏆 Top Recruiters', value: '*No hires logged yet for this period.*', inline: false });
   }
@@ -214,7 +265,7 @@ async function buildRecruitingLeaderboardEmbed(period, prevWeek = false, prevDay
 
   // Master Agency
   if (masterEntries.length) {
-    for (const f of chunkFields(rankLines(tree, masterEntries), '🏛️ Master Agency · 🌱 Hires')) embed.addFields(f);
+    for (const f of chunkFields(rankLines(tree, masterEntries, monthlyMaster), '🏛️ Master Agency · 🌱 Hires')) embed.addFields(f);
   } else {
     embed.addFields({ name: '🏛️ Master Agency · 🌱 Hires', value: '*No hires logged yet for this period.*', inline: false });
   }
@@ -223,9 +274,26 @@ async function buildRecruitingLeaderboardEmbed(period, prevWeek = false, prevDay
 
   // Base Shop
   if (baseEntries.length) {
-    for (const f of chunkFields(rankLines(tree, baseEntries), '🏢 Base Shop · 🌱 Hires')) embed.addFields(f);
+    for (const f of chunkFields(rankLines(tree, baseEntries, monthlyBase), '🏢 Base Shop · 🌱 Hires')) embed.addFields(f);
   } else {
     embed.addFields({ name: '🏢 Base Shop · 🌱 Hires', value: '*No hires logged yet for this period.*', inline: false });
+  }
+
+  // Badge guide — monthly board only, keeps daily/weekly clean.
+  if (period === 'monthly') {
+    embed.addFields({
+      name: '📖 Badge Guide',
+      value: [
+        `**Recruiter Rank** · hires this month`,
+        `🎯 Recruiter 0+ · 🧲 Talent Scout 5+ · 🏗️ Builder 10+`,
+        `🏰 Founder 25+ · 💪 Kingmaker 50+ · 🌎 Empire Architect 100+`,
+        ``,
+        `**Best Recruiting Day** · 🌱 ⭐ 3 · 💥 5 · ⚡ 7 · 🌌 10+`,
+        `**Team Badge** · monthly hires · ✨ 25 · ⭐ 50 · 🌟 100 · 💫 200 · 🔥 300 · ⚡ 400 · 🌌 500+`,
+        `🎖️ **Reigning Recruiter** — last month's #1`,
+      ].join('\n'),
+      inline: false,
+    });
   }
 
   embed.setFooter({ text: 'OFG - Recruiting Tracker' });
@@ -334,7 +402,44 @@ async function handleHireModal(interaction, client) {
       try {
         const channel = await client.channels.fetch(channelId);
         await channel.send({ embeds: [card] });
-      } catch (e) { console.error('Hire card post error:', e.message); }
+
+        // ── Celebrations (leaders channel) ────────────────────────────────────
+        // stats.monthly_count already includes the hire we just logged.
+        const monthlyCount = stats.monthly_count;
+
+        // 1) RANK UP — crossed a tier (5 / 10 / 25 / 50 / 100).
+        const before = getRecruiterRankForCount(monthlyCount - 1);
+        const after  = getRecruiterRankForCount(monthlyCount);
+        if (after.id > before.id) {
+          await channel.send(
+            `${after.emoji} **RANK UP!** <@${uplineId}> just reached **${after.name}** ` +
+            `with **${monthlyCount} recruits** this month! The empire grows. 🌱`
+          );
+        }
+
+        // 2) DAILY STREAK — 3+ hires logged today.
+        const dailyCount = await getRecruiterDailyCount(uplineId);
+        const streak = dailyStreakMilestone(dailyCount);
+        if (streak) {
+          await channel.send(
+            `${streak.emoji} <@${uplineId}> is recruiting like a machine — ` +
+            `**${dailyCount} new recruits today!** Who's keeping up? 🌱🔥`
+          );
+        }
+
+        // 3) AUTO-GROW GOAL — team total crossed the monthly goal → bump +25.
+        const monthlyTeamTotal = await getMonthlyHireTotal();
+        let goal = await getHireGoal();
+        if (monthlyTeamTotal >= goal) {
+          let newGoal = goal;
+          while (monthlyTeamTotal >= newGoal) newGoal += 25;
+          await setHireGoal(newGoal);
+          await channel.send(
+            `🎉🌱 **GOAL CRUSHED!** The team blew past **${goal} recruits** this month! ` +
+            `New target: **${newGoal}** — let's run it up! 🚀`
+          );
+        }
+      } catch (e) { console.error('Hire card / celebration post error:', e.message); }
     }
 
     await interaction.editReply({
