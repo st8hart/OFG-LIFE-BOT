@@ -69,16 +69,16 @@ function bestDayEmoji(count) {
   return '';
 }
 // Team badge by MONTHLY hires — shown on base shop & master agency lines.
-// Deliberately a medal/prestige theme so it never collides with the cosmic
-// best-day flair above (no stars, no shared glyphs).
+// Deliberately avoids 🥇🥈🥉 (those are the 1st/2nd/3rd podium markers on every
+// board line) and the cosmic best-day glyphs, so nothing reads as a position.
 function teamBadgeEmoji(monthlyHires) {
   if (monthlyHires >= 500) return '⚜️';
   if (monthlyHires >= 400) return '🔱';
   if (monthlyHires >= 300) return '💎';
   if (monthlyHires >= 200) return '🏆';
-  if (monthlyHires >= 100) return '🥇';
-  if (monthlyHires >= 50)  return '🥈';
-  if (monthlyHires >= 25)  return '🥉';
+  if (monthlyHires >= 100) return '💠';
+  if (monthlyHires >= 50)  return '🏵️';
+  if (monthlyHires >= 25)  return '🛡️';
   return '';
 }
 // Daily streak shoutout tiers (3+ hires in a day) — escalating emoji.
@@ -296,7 +296,7 @@ async function buildRecruitingLeaderboardEmbed(period, prevWeek = false, prevDay
         `🏰 Founder 25+ · 💪 Kingmaker 50+ · 🌎 Empire Architect 100+`,
         ``,
         `**Best Recruiting Day** · 🎇 2 · 🎆 3 · 🧨 4 · 💥 5 · 🔥 6 · ⚡ 7 · ☄️ 8 · 🚀 9 · 🌌 10+`,
-        `**Team Badge** · monthly hires · 🥉 25 · 🥈 50 · 🥇 100 · 🏆 200 · 💎 300 · 🔱 400 · ⚜️ 500+`,
+        `**Team Badge** · monthly hires · 🛡️ 25 · 🏵️ 50 · 💠 100 · 🏆 200 · 💎 300 · 🔱 400 · ⚜️ 500+`,
         `🎖️ **Reigning Recruiter** — last month's #1`,
       ].join('\n'),
       inline: false,
