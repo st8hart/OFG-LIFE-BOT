@@ -852,7 +852,124 @@ async function removeUnassignedProducer(userId) {
   if (error) console.error('[unassigned_producers] remove failed:', error.message || error);
 }
 
+// ── Hires (recruiting) ──────────────────────────────────────────────────────────
+// Same shape as sales, but the credit goes to the RECRUITER (recruiter_id = the
+// upline's Discord id), since a brand-new hire usually has no Discord account yet.
+// All Central-time windowing reuses the same helpers the sales boards use.
+
+async function addHire({ recruitName, state, licensed, source, recruiterId, recruiterName, notes }) {
+  const { data, error } = await supabase.from('hires').insert([{
+    recruit_name: recruitName,
+    state: state || '',
+    licensed: !!licensed,
+    source: source || '',
+    recruiter_id: recruiterId,
+    recruiter_name: (recruiterName && String(recruiterName).trim()) || recruiterId,
+    notes: notes || '',
+  }]).select().single();
+  if (error) throw error;
+  return data;
+}
+
+// Per-recruiter hire counts for a period (mirrors getLeaderboard).
+async function getHireLeaderboard(period, prevWeek = false, prevDay = false) {
+  let query = supabase.from('hires').select('recruiter_id, recruiter_name, created_at');
+  const now = new Date();
+  if (period === 'daily') {
+    if (prevDay) {
+      query = query
+        .gte('created_at', getYesterdayStart().toISOString())
+        .lt('created_at', getDayStart().toISOString());
+    } else {
+      query = query.gte('created_at', getDayStart().toISOString());
+    }
+  } else if (period === 'weekly') {
+    query = query.gte('created_at', getWeekStart(prevWeek).toISOString());
+    if (prevWeek) query = query.lt('created_at', getWeekStart(false).toISOString());
+  } else if (period === 'monthly') {
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    query = query.gte('created_at', start.toISOString());
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  const map = {};
+  for (const h of data) {
+    if (!map[h.recruiter_id]) map[h.recruiter_id] = { recruiter_id: h.recruiter_id, recruiter_name: h.recruiter_name, count: 0 };
+    map[h.recruiter_id].count++;
+    if (h.recruiter_name) map[h.recruiter_id].recruiter_name = h.recruiter_name;
+  }
+  return Object.values(map).sort((a, b) => b.count - a.count);
+}
+
+// Per-source hire counts for a period (for the "Hires by Source" board line).
+async function getHireSourceCounts(period, prevWeek = false, prevDay = false) {
+  let query = supabase.from('hires').select('source, created_at');
+  const now = new Date();
+  if (period === 'daily') {
+    if (prevDay) {
+      query = query
+        .gte('created_at', getYesterdayStart().toISOString())
+        .lt('created_at', getDayStart().toISOString());
+    } else {
+      query = query.gte('created_at', getDayStart().toISOString());
+    }
+  } else if (period === 'weekly') {
+    query = query.gte('created_at', getWeekStart(prevWeek).toISOString());
+    if (prevWeek) query = query.lt('created_at', getWeekStart(false).toISOString());
+  } else if (period === 'monthly') {
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    query = query.gte('created_at', start.toISOString());
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  const counts = {};
+  for (const h of data) {
+    const key = h.source || '';
+    counts[key] = (counts[key] || 0) + 1;
+  }
+  return counts;
+}
+
+// Team-wide hires this month (for the goal/progress bar).
+async function getMonthlyHireTotal() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const { data, error } = await supabase.from('hires').select('id').gte('created_at', start.toISOString());
+  if (error) throw error;
+  return data.length;
+}
+
+// One recruiter's daily / weekly / monthly / all-time hire counts (for the card).
+async function getUserHireStats(recruiterId) {
+  const now = new Date();
+  const todayStart = getDayStart();
+  const weekStart  = getWeekStart();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const { data, error } = await supabase.from('hires').select('created_at').eq('recruiter_id', recruiterId);
+  if (error) throw error;
+  const daily   = data.filter(h => new Date(h.created_at) >= todayStart);
+  const weekly  = data.filter(h => new Date(h.created_at) >= weekStart);
+  const monthly = data.filter(h => new Date(h.created_at) >= monthStart);
+  return {
+    daily_count:   daily.length,
+    weekly_count:  weekly.length,
+    monthly_count: monthly.length,
+    total_count:   data.length,
+  };
+}
+
+async function getHireGoal() {
+  const { data, error } = await supabase.from('settings').select('value').eq('key', 'monthly_hire_goal').single();
+  if (error || !data) return parseInt(process.env.MONTHLY_HIRE_GOAL || 100, 10);
+  return parseInt(data.value, 10);
+}
+
+async function setHireGoal(count) {
+  await supabase.from('settings').upsert({ key: 'monthly_hire_goal', value: String(count) });
+}
+
 module.exports = {
+  addHire, getHireLeaderboard, getHireSourceCounts, getMonthlyHireTotal, getUserHireStats, getHireGoal, setHireGoal,
   getTeamTree, getTeamMembersRaw, upsertTeamMember, removeTeamMember, ensureAgencyNode,
   recordUnassignedProducer, removeUnassignedProducer,
   addSale, getLeaderboard, getMonthlyTotal, getMonthlyTotalsMap, getBestDailyBadgesMap, getUserStats, getTeamStats,

@@ -29,6 +29,11 @@ const {
   clearPendingChallengesCommand,
 } = require('./commands');
 const { buildTeamLeaderboardEmbed, teamLeaderboardCommand, teamAssignCommand, teamRemoveCommand, teamSetupCommand } = require('./team-leaderboard');
+const {
+  buildRecruitingLeaderboardEmbed,
+  addHireCommand, recruitingLeaderboardCommand, setHireGoalCommand,
+  handleHireModal,
+} = require('./recruiting-leaderboard');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
@@ -53,6 +58,9 @@ const commands = [
   teamAssignCommand,
   teamRemoveCommand,
   teamSetupCommand,
+  addHireCommand,
+  recruitingLeaderboardCommand,
+  setHireGoalCommand,
 ];
 for (const cmd of commands) client.commands.set(cmd.data.name, cmd);
 
@@ -91,6 +99,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
   if (interaction.isModalSubmit() && interaction.customId.startsWith('saleModal')) {
     await handleSaleModal(interaction);
+  }
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('addHireModal')) {
+    await handleHireModal(interaction, client);
   }
 });
 
@@ -665,6 +676,18 @@ function scheduleLeaderboards(client) {
     } catch (err) { console.error('Team leaderboard error:', err.message); }
   };
 
+  // Recruiting leaderboard poster — posts to the leaders channel (RECRUITING_CHANNEL_ID).
+  const postRecruitingLeaderboard = async (period, intro = null, prevWeek = false, prevDay = false, final = false) => {
+    const channelId = process.env.RECRUITING_CHANNEL_ID;
+    if (!channelId) return;
+    try {
+      const channel = await client.channels.fetch(channelId);
+      const embed = await buildRecruitingLeaderboardEmbed(period, prevWeek, prevDay);
+      if (final) embed.setColor(0xFFD700);
+      await channel.send(intro ? { content: intro, embeds: [embed] } : { embeds: [embed] });
+    } catch (err) { console.error('Recruiting leaderboard error:', err.message); }
+  };
+
   // Daily every 2hrs 12pm-midnight Central
   setInterval(() => {
     const hour = getCentralHour();
@@ -974,6 +997,39 @@ function scheduleLeaderboards(client) {
     if (now.getDate() === 1 && hour === 8 && min === 2 && !lastPosted[key('team-final-monthly')]) {
       lastPosted[key('team-final-monthly')] = true;
       postTeamLeaderboard('monthly', `🏛️ **OFG TEAM RECAP — THE MONTH IS CLOSED** 🏛️`, false, false, true);
+    }
+
+    // ── RECRUITING LEADERBOARDS (leaders channel) ───────────────────────────────
+    // Same recap cadence as production, posted to RECRUITING_CHANNEL_ID. Recaps
+    // only — no every-2-hours intraday posts.
+    // Daily recap — 8am (yesterday's hires), skips Monday
+    if (hour === 8 && min === 0 && day !== 1 && !lastPosted[key('recruit-final-daily')]) {
+      lastPosted[key('recruit-final-daily')] = true;
+      postRecruitingLeaderboard('daily', `🌱 **OFG RECRUITING RECAP — YESTERDAY'S HIRES** 🌱`, false, true, true);
+    }
+
+    // Weekly — 9am, skips Monday
+    if (hour === 9 && min === 0 && day !== 1 && !lastPosted[key('recruit-weekly')]) {
+      lastPosted[key('recruit-weekly')] = true;
+      postRecruitingLeaderboard('weekly');
+    }
+
+    // Final weekly — Monday 8am (last week locked in)
+    if (day === 1 && hour === 8 && min === 0 && !lastPosted[key('recruit-final-weekly')]) {
+      lastPosted[key('recruit-final-weekly')] = true;
+      postRecruitingLeaderboard('weekly', `🌱 **OFG RECRUITING RECAP — LAST WEEK LOCKED IN** 🌱`, true, false, true);
+    }
+
+    // Monthly — Mon/Wed/Fri 10am
+    if ((day === 1 || day === 3 || day === 5) && hour === 10 && min === 0 && !lastPosted[key('recruit-monthly')]) {
+      lastPosted[key('recruit-monthly')] = true;
+      postRecruitingLeaderboard('monthly');
+    }
+
+    // Final monthly — 1st at 8am
+    if (now.getDate() === 1 && hour === 8 && min === 0 && !lastPosted[key('recruit-final-monthly')]) {
+      lastPosted[key('recruit-final-monthly')] = true;
+      postRecruitingLeaderboard('monthly', `🌱 **OFG RECRUITING RECAP — THE MONTH IS CLOSED** 🌱`, false, false, true);
     }
 
   }, 60 * 1000);
