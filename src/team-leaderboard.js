@@ -4,7 +4,7 @@ const {
   getLeaderboard, getMonthlyTotal, getGoal,
   getTeamTree, upsertTeamMember, removeTeamMember, ensureAgencyNode, removeUnassignedProducer,
 } = require('./database');
-const { buildBoardTitle } = require('./board-titles');
+const { buildBoardTitle, buildBoardColor } = require('./board-titles');
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 const PERIOD_COLORS = { daily: 0x1ABC9C, weekly: 0xE67E22, monthly: 0xF1C40F };
@@ -82,7 +82,7 @@ async function buildTeamLeaderboardEmbed(period, prevWeek = false, prevDay = fal
 
   const title = buildBoardTitle('team', period, prevWeek, prevDay, prevMonth);
 
-  const embed = new EmbedBuilder().setColor(PERIOD_COLORS[period] || 0xF1C40F).setTitle(title).setTimestamp();
+  const embed = new EmbedBuilder().setColor(buildBoardColor('team', period, prevWeek, prevDay, prevMonth)).setTitle(title).setTimestamp();
 
   // Summary header — period total + agency (monthly) total + goal, like the producer boards
   const monthlyTotal = await getMonthlyTotal(prevMonth);

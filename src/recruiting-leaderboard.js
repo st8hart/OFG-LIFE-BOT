@@ -18,7 +18,7 @@ const {
   addHire, getHireLeaderboard, getHireSourceCounts, getMonthlyHireTotal, getUserHireStats, getHireGoal, setHireGoal,
   getRecruiterRankForCount, getMonthlyRecruitCountsMap, getReigningRecruiterId, getBestRecruitingDayMap, getRecruiterDailyCount,
 } = require('./database');
-const { buildBoardTitle } = require('./board-titles');
+const { buildBoardTitle, buildBoardColor } = require('./board-titles');
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 const PERIOD_COLORS = { daily: 0x1ABC9C, weekly: 0x2ECC71, monthly: 0x27AE60 };
@@ -58,26 +58,33 @@ function formatHires(n) {
 // Best single-day hire count this month → a flair next to the recruiter.
 function bestDayEmoji(count) {
   if (count >= 10) return '🌌';
+  if (count >= 9)  return '🚀';
+  if (count >= 8)  return '☄️';
   if (count >= 7)  return '⚡';
+  if (count >= 6)  return '🔥';
   if (count >= 5)  return '💥';
-  if (count >= 3)  return '⭐';
+  if (count >= 4)  return '🧨';
+  if (count >= 3)  return '🎆';
+  if (count >= 2)  return '🎇';
   return '';
 }
 // Team badge by MONTHLY hires — shown on base shop & master agency lines.
+// Deliberately a medal/prestige theme so it never collides with the cosmic
+// best-day flair above (no stars, no shared glyphs).
 function teamBadgeEmoji(monthlyHires) {
-  if (monthlyHires >= 500) return '🌌';
-  if (monthlyHires >= 400) return '⚡';
-  if (monthlyHires >= 300) return '🔥';
-  if (monthlyHires >= 200) return '💫';
-  if (monthlyHires >= 100) return '🌟';
-  if (monthlyHires >= 50)  return '⭐';
-  if (monthlyHires >= 25)  return '✨';
+  if (monthlyHires >= 500) return '⚜️';
+  if (monthlyHires >= 400) return '🔱';
+  if (monthlyHires >= 300) return '💎';
+  if (monthlyHires >= 200) return '🏆';
+  if (monthlyHires >= 100) return '🥇';
+  if (monthlyHires >= 50)  return '🥈';
+  if (monthlyHires >= 25)  return '🥉';
   return '';
 }
 // Daily streak shoutout tiers (3+ hires in a day) — escalating emoji.
 function dailyStreakMilestone(count) {
   if (count < 3) return null;
-  const emoji = count >= 10 ? '🌌' : count >= 7 ? '⚡' : count >= 5 ? '💥' : '⭐';
+  const emoji = count >= 10 ? '🌌' : count >= 7 ? '⚡' : count >= 5 ? '💥' : '🎆';
   return { emoji, count };
 }
 
@@ -206,7 +213,7 @@ async function buildRecruitingLeaderboardEmbed(period, prevWeek = false, prevDay
 
   const title = buildBoardTitle('recruiting', period, prevWeek, prevDay, prevMonth);
 
-  const embed = new EmbedBuilder().setColor(PERIOD_COLORS[period] || CARD_COLOR).setTitle(title).setTimestamp();
+  const embed = new EmbedBuilder().setColor(buildBoardColor('recruiting', period, prevWeek, prevDay, prevMonth)).setTitle(title).setTimestamp();
 
   const monthlyTotal = await getMonthlyHireTotal(prevMonth);
   const goal = await getHireGoal();
@@ -288,8 +295,8 @@ async function buildRecruitingLeaderboardEmbed(period, prevWeek = false, prevDay
         `🎯 Recruiter 0+ · 🧲 Talent Scout 5+ · 🏗️ Builder 10+`,
         `🏰 Founder 25+ · 💪 Kingmaker 50+ · 🌎 Empire Architect 100+`,
         ``,
-        `**Best Recruiting Day** · 🌱 ⭐ 3 · 💥 5 · ⚡ 7 · 🌌 10+`,
-        `**Team Badge** · monthly hires · ✨ 25 · ⭐ 50 · 🌟 100 · 💫 200 · 🔥 300 · ⚡ 400 · 🌌 500+`,
+        `**Best Recruiting Day** · 🎇 2 · 🎆 3 · 🧨 4 · 💥 5 · 🔥 6 · ⚡ 7 · ☄️ 8 · 🚀 9 · 🌌 10+`,
+        `**Team Badge** · monthly hires · 🥉 25 · 🥈 50 · 🥇 100 · 🏆 200 · 💎 300 · 🔱 400 · ⚜️ 500+`,
         `🎖️ **Reigning Recruiter** — last month's #1`,
       ].join('\n'),
       inline: false,

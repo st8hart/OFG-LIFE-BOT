@@ -1,7 +1,7 @@
 // src/leaderboard.js
 const { EmbedBuilder } = require('discord.js');
 const { getLeaderboard, getMonthlyTotal, getMonthlyTotalsMap, getBestDailyBadgesMap, getHotWeekBadgesSet, getNewProducerSet, getEarlyBirdSet, getHighRollerSet, getReigningChampionId, getShowstopperId, getRankForAmount, getGoal } = require('./database');
-const { buildBoardTitle } = require('./board-titles');
+const { buildBoardTitle, buildBoardColor } = require('./board-titles');
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 const PERIOD_COLORS = {
@@ -53,7 +53,7 @@ async function buildLeaderboardEmbed(period, prevWeek = false, prevDay = false, 
 
   const title = buildBoardTitle('production', period, prevWeek, prevDay, prevMonth);
 
-  const color = PERIOD_COLORS[period] || 0xF1C40F;
+  const color = buildBoardColor('production', period, prevWeek, prevDay, prevMonth);
   const embed = new EmbedBuilder().setColor(color).setTitle(title).setTimestamp();
 
   // Period summary block
