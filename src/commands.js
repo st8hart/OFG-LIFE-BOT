@@ -70,17 +70,24 @@ const leaderboardCommand = {
   data: new SlashCommandBuilder().setName('leaderboard').setDescription('View the sales leaderboard')
     .addStringOption(opt => opt.setName('period').setDescription('Time period').setRequired(false)
       .addChoices(
-        { name: 'Daily',     value: 'daily' },
-        { name: 'Yesterday', value: 'yesterday' },
-        { name: 'Weekly',    value: 'weekly' },
-        { name: 'Monthly',   value: 'monthly' },
+        { name: 'Daily',      value: 'daily' },
+        { name: 'Yesterday',  value: 'yesterday' },
+        { name: 'Weekly',     value: 'weekly' },
+        { name: 'Last Week',  value: 'lastweek' },
+        { name: 'Monthly',    value: 'monthly' },
+        { name: 'Last Month', value: 'lastmonth' },
       )),
   async execute(interaction) {
     await interaction.deferReply();
     const period = interaction.options.getString('period') || 'monthly';
     if (period === 'yesterday') {
-      const embed = await buildLeaderboardEmbed('daily', false, true);
-      return interaction.editReply({ embeds: [embed] });
+      return interaction.editReply({ embeds: [await buildLeaderboardEmbed('daily', false, true)] });
+    }
+    if (period === 'lastweek') {
+      return interaction.editReply({ embeds: [await buildLeaderboardEmbed('weekly', true, false)] });
+    }
+    if (period === 'lastmonth') {
+      return interaction.editReply({ embeds: [await buildLeaderboardEmbed('monthly', false, false, true)] });
     }
     const embed = await buildLeaderboardEmbed(period);
     await interaction.editReply({ embeds: [embed] });

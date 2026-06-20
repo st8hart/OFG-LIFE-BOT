@@ -1,6 +1,7 @@
 // src/leaderboard.js
 const { EmbedBuilder } = require('discord.js');
 const { getLeaderboard, getMonthlyTotal, getMonthlyTotalsMap, getBestDailyBadgesMap, getHotWeekBadgesSet, getNewProducerSet, getEarlyBirdSet, getHighRollerSet, getReigningChampionId, getShowstopperId, getRankForAmount, getGoal } = require('./database');
+const { buildBoardTitle } = require('./board-titles');
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 const PERIOD_COLORS = {
@@ -35,27 +36,22 @@ async function getPeriodTotal(period, rows) {
   return rows.reduce((sum, r) => sum + r.total, 0);
 }
 
-async function buildLeaderboardEmbed(period, prevWeek = false, prevDay = false) {
-  const rows = await getLeaderboard(period, prevWeek, prevDay);
-  const monthlyTotal = await getMonthlyTotal();
+async function buildLeaderboardEmbed(period, prevWeek = false, prevDay = false, prevMonth = false) {
+  const historical = prevMonth; // a "last month" view — suppress live-only badges
+  const rows = await getLeaderboard(period, prevWeek, prevDay, prevMonth);
+  const monthlyTotal = await getMonthlyTotal(prevMonth);
   const currentGoal = await getGoal();
   const periodTotal = rows.reduce((sum, r) => sum + r.total, 0);
-  const monthlyMap      = await getMonthlyTotalsMap();
-  const badgeMap        = await getBestDailyBadgesMap();
-  const hotWeekSet      = await getHotWeekBadgesSet();
-  const newProducerSet  = await getNewProducerSet();
-  const highRollerSet   = await getHighRollerSet();
-  const reigningChampId = await getReigningChampionId();
-  const showstopperId   = await getShowstopperId();
-  const earlyBirdSet    = period === 'daily' ? await getEarlyBirdSet() : new Set();
+  const monthlyMap      = await getMonthlyTotalsMap(prevMonth);
+  const badgeMap        = historical ? {}        : await getBestDailyBadgesMap();
+  const hotWeekSet      = historical ? new Set() : await getHotWeekBadgesSet();
+  const newProducerSet  = historical ? new Set() : await getNewProducerSet();
+  const highRollerSet   = historical ? new Set() : await getHighRollerSet();
+  const reigningChampId = historical ? null      : await getReigningChampionId();
+  const showstopperId   = historical ? null      : await getShowstopperId();
+  const earlyBirdSet    = (period === 'daily' && !historical) ? await getEarlyBirdSet() : new Set();
 
-  const monthName = new Date().toLocaleString('en-US', { month: 'long' }).toUpperCase();
-  const year = new Date().getFullYear();
-
-  let title = '';
-  if (period === 'daily')   title = prevDay ? `📅 OFG YESTERDAY'S LEADERBOARD` : `📅 OFG TODAY'S LEADERBOARD`;
-  if (period === 'weekly')  title = prevWeek ? `📆 OFG LAST WEEK'S LEADERBOARD` : `📆 OFG THIS WEEK'S LEADERBOARD`;
-  if (period === 'monthly') title = `🏆 OFG ${monthName} ${year} LEADERBOARD`;
+  const title = buildBoardTitle('production', period, prevWeek, prevDay, prevMonth);
 
   const color = PERIOD_COLORS[period] || 0xF1C40F;
   const embed = new EmbedBuilder().setColor(color).setTitle(title).setTimestamp();

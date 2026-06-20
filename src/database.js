@@ -47,7 +47,7 @@ async function addSale({ userId, username, clientName, policyType, premium, carr
   return data;
 }
 
-async function getLeaderboard(period, prevWeek = false, prevDay = false) {
+async function getLeaderboard(period, prevWeek = false, prevDay = false, prevMonth = false) {
   let query = supabase.from('sales').select('user_id, username, premium');
   const now = new Date();
   if (period === 'daily') {
@@ -68,8 +68,13 @@ async function getLeaderboard(period, prevWeek = false, prevDay = false) {
       query = query.lt('created_at', getWeekStart(false).toISOString());
     }
   } else if (period === 'monthly') {
-    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const start = prevMonth
+      ? new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      : new Date(now.getFullYear(), now.getMonth(), 1);
     query = query.gte('created_at', start.toISOString());
+    if (prevMonth) {
+      query = query.lt('created_at', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
+    }
   }
   const { data, error } = await query;
   if (error) throw error;
@@ -82,22 +87,30 @@ async function getLeaderboard(period, prevWeek = false, prevDay = false) {
   return Object.values(map).sort((a, b) => b.total - a.total);
 }
 
-async function getMonthlyTotal() {
+async function getMonthlyTotal(prevMonth = false) {
   const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  const { data, error } = await supabase.from('sales').select('premium').gte('created_at', start.toISOString());
+  const start = prevMonth
+    ? new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    : new Date(now.getFullYear(), now.getMonth(), 1);
+  let q = supabase.from('sales').select('premium').gte('created_at', start.toISOString());
+  if (prevMonth) q = q.lt('created_at', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
+  const { data, error } = await q;
   if (error) throw error;
   return data.reduce((sum, s) => sum + parseFloat(s.premium), 0);
 }
 
 // Returns a map of { userId: monthlyTotal } for all agents — used so daily/weekly
 // leaderboards can show the correct monthly-based rank badge for each agent.
-async function getMonthlyTotalsMap() {
+async function getMonthlyTotalsMap(prevMonth = false) {
   const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  const { data, error } = await supabase.from('sales')
+  const start = prevMonth
+    ? new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    : new Date(now.getFullYear(), now.getMonth(), 1);
+  let q = supabase.from('sales')
     .select('user_id, premium')
     .gte('created_at', start.toISOString());
+  if (prevMonth) q = q.lt('created_at', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
+  const { data, error } = await q;
   if (error) return {};
   const map = {};
   for (const s of data) {
@@ -872,7 +885,7 @@ async function addHire({ recruitName, state, licensed, source, recruiterId, recr
 }
 
 // Per-recruiter hire counts for a period (mirrors getLeaderboard).
-async function getHireLeaderboard(period, prevWeek = false, prevDay = false) {
+async function getHireLeaderboard(period, prevWeek = false, prevDay = false, prevMonth = false) {
   let query = supabase.from('hires').select('recruiter_id, recruiter_name, created_at');
   const now = new Date();
   if (period === 'daily') {
@@ -887,8 +900,11 @@ async function getHireLeaderboard(period, prevWeek = false, prevDay = false) {
     query = query.gte('created_at', getWeekStart(prevWeek).toISOString());
     if (prevWeek) query = query.lt('created_at', getWeekStart(false).toISOString());
   } else if (period === 'monthly') {
-    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const start = prevMonth
+      ? new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      : new Date(now.getFullYear(), now.getMonth(), 1);
     query = query.gte('created_at', start.toISOString());
+    if (prevMonth) query = query.lt('created_at', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
   }
   const { data, error } = await query;
   if (error) throw error;
@@ -902,7 +918,7 @@ async function getHireLeaderboard(period, prevWeek = false, prevDay = false) {
 }
 
 // Per-source hire counts for a period (for the "Hires by Source" board line).
-async function getHireSourceCounts(period, prevWeek = false, prevDay = false) {
+async function getHireSourceCounts(period, prevWeek = false, prevDay = false, prevMonth = false) {
   let query = supabase.from('hires').select('source, created_at');
   const now = new Date();
   if (period === 'daily') {
@@ -917,8 +933,11 @@ async function getHireSourceCounts(period, prevWeek = false, prevDay = false) {
     query = query.gte('created_at', getWeekStart(prevWeek).toISOString());
     if (prevWeek) query = query.lt('created_at', getWeekStart(false).toISOString());
   } else if (period === 'monthly') {
-    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const start = prevMonth
+      ? new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      : new Date(now.getFullYear(), now.getMonth(), 1);
     query = query.gte('created_at', start.toISOString());
+    if (prevMonth) query = query.lt('created_at', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
   }
   const { data, error } = await query;
   if (error) throw error;
@@ -931,10 +950,14 @@ async function getHireSourceCounts(period, prevWeek = false, prevDay = false) {
 }
 
 // Team-wide hires this month (for the goal/progress bar).
-async function getMonthlyHireTotal() {
+async function getMonthlyHireTotal(prevMonth = false) {
   const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  const { data, error } = await supabase.from('hires').select('id').gte('created_at', start.toISOString());
+  const start = prevMonth
+    ? new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    : new Date(now.getFullYear(), now.getMonth(), 1);
+  let q = supabase.from('hires').select('id').gte('created_at', start.toISOString());
+  if (prevMonth) q = q.lt('created_at', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
+  const { data, error } = await q;
   if (error) throw error;
   return data.length;
 }

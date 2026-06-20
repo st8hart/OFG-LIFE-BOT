@@ -4,6 +4,7 @@ const {
   getLeaderboard, getMonthlyTotal, getGoal,
   getTeamTree, upsertTeamMember, removeTeamMember, ensureAgencyNode, removeUnassignedProducer,
 } = require('./database');
+const { buildBoardTitle } = require('./board-titles');
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 const PERIOD_COLORS = { daily: 0x1ABC9C, weekly: 0xE67E22, monthly: 0xF1C40F };
@@ -69,9 +70,9 @@ function rollupMaster(tree, personal) {
   }).filter(e => e.total > 0).sort((a, b) => b.total - a.total);
 }
 
-async function buildTeamLeaderboardEmbed(period, prevWeek = false, prevDay = false) {
+async function buildTeamLeaderboardEmbed(period, prevWeek = false, prevDay = false, prevMonth = false) {
   const tree = await getTeamTree();
-  const rows = await getLeaderboard(period, prevWeek, prevDay);
+  const rows = await getLeaderboard(period, prevWeek, prevDay, prevMonth);
   const personal = {};
   for (const r of rows) personal[r.user_id] = (personal[r.user_id] || 0) + r.total;
   const periodTotal = Object.values(personal).reduce((s, v) => s + v, 0);
@@ -79,18 +80,12 @@ async function buildTeamLeaderboardEmbed(period, prevWeek = false, prevDay = fal
   const baseEntries   = rollupBaseShop(tree, personal);
   const masterEntries = rollupMaster(tree, personal);
 
-  const monthName = new Date().toLocaleString('en-US', { month: 'long' }).toUpperCase();
-  const year = new Date().getFullYear();
-
-  let title = '';
-  if (period === 'daily')   title = prevDay  ? `👑 OFG TEAM LEADERBOARD — YESTERDAY`  : `👑 OFG TEAM LEADERBOARD — TODAY`;
-  if (period === 'weekly')  title = prevWeek ? `👑 OFG TEAM LEADERBOARD — LAST WEEK`  : `👑 OFG TEAM LEADERBOARD — THIS WEEK`;
-  if (period === 'monthly') title = `👑 OFG TEAM LEADERBOARD — ${monthName} ${year}`;
+  const title = buildBoardTitle('team', period, prevWeek, prevDay, prevMonth);
 
   const embed = new EmbedBuilder().setColor(PERIOD_COLORS[period] || 0xF1C40F).setTitle(title).setTimestamp();
 
   // Summary header — period total + agency (monthly) total + goal, like the producer boards
-  const monthlyTotal = await getMonthlyTotal();
+  const monthlyTotal = await getMonthlyTotal(prevMonth);
   const goal = await getGoal();
   if (period === 'daily') {
     embed.addFields({
@@ -130,17 +125,17 @@ async function buildTeamLeaderboardEmbed(period, prevWeek = false, prevDay = fal
 
   // Master Agency on top, Base Shop below.
   if (masterEntries.length) {
-    for (const f of chunkFields(rankLines(tree, masterEntries), '🏛️ Master Agency Leaderboard')) embed.addFields(f);
+    for (const f of chunkFields(rankLines(tree, masterEntries), '🏛️ Master Agency · 💵 Production')) embed.addFields(f);
   } else {
-    embed.addFields({ name: '🏛️ Master Agency Leaderboard', value: '*No production logged yet for this period.*', inline: false });
+    embed.addFields({ name: '🏛️ Master Agency · 💵 Production', value: '*No production logged yet for this period.*', inline: false });
   }
   // Visual divider between the Master Agency and Base Shop sections (same message)
   embed.addFields({ name: '\u200b', value: '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', inline: false });
 
   if (baseEntries.length) {
-    for (const f of chunkFields(rankLines(tree, baseEntries), '🏢 Base Shop Leaderboard')) embed.addFields(f);
+    for (const f of chunkFields(rankLines(tree, baseEntries), '🏢 Base Shop · 💵 Production')) embed.addFields(f);
   } else {
-    embed.addFields({ name: '🏢 Base Shop Leaderboard', value: '*No production logged yet for this period.*', inline: false });
+    embed.addFields({ name: '🏢 Base Shop · 💵 Production', value: '*No production logged yet for this period.*', inline: false });
   }
 
   embed.setFooter({ text: 'OFG - Leadership Tracker' });
@@ -190,15 +185,19 @@ const teamLeaderboardCommand = {
     .setDescription('View the team / leadership leaderboard')
     .addStringOption(opt => opt.setName('period').setDescription('Time period').setRequired(false)
       .addChoices(
-        { name: 'Daily',     value: 'daily' },
-        { name: 'Yesterday', value: 'yesterday' },
-        { name: 'Weekly',    value: 'weekly' },
-        { name: 'Monthly',   value: 'monthly' },
+        { name: 'Daily',      value: 'daily' },
+        { name: 'Yesterday',  value: 'yesterday' },
+        { name: 'Weekly',     value: 'weekly' },
+        { name: 'Last Week',  value: 'lastweek' },
+        { name: 'Monthly',    value: 'monthly' },
+        { name: 'Last Month', value: 'lastmonth' },
       )),
   async execute(interaction) {
     await interaction.deferReply();
     const period = interaction.options.getString('period') || 'monthly';
     if (period === 'yesterday') return interaction.editReply({ embeds: [await buildTeamLeaderboardEmbed('daily', false, true)] });
+    if (period === 'lastweek')  return interaction.editReply({ embeds: [await buildTeamLeaderboardEmbed('weekly', true, false)] });
+    if (period === 'lastmonth') return interaction.editReply({ embeds: [await buildTeamLeaderboardEmbed('monthly', false, false, true)] });
     await interaction.editReply({ embeds: [await buildTeamLeaderboardEmbed(period)] });
   },
 };

@@ -17,6 +17,7 @@ const {
   getTeamTree,
   addHire, getHireLeaderboard, getHireSourceCounts, getMonthlyHireTotal, getUserHireStats, getHireGoal, setHireGoal,
 } = require('./database');
+const { buildBoardTitle } = require('./board-titles');
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 const PERIOD_COLORS = { daily: 0x1ABC9C, weekly: 0x2ECC71, monthly: 0x27AE60 };
@@ -142,9 +143,9 @@ function masterLabelFor(tree, id) {
 }
 
 // ── Recruiting board embed (Top Recruiters + Master Agency + Base Shop) ──────────
-async function buildRecruitingLeaderboardEmbed(period, prevWeek = false, prevDay = false) {
+async function buildRecruitingLeaderboardEmbed(period, prevWeek = false, prevDay = false, prevMonth = false) {
   const tree = await getTeamTree();
-  const rows = await getHireLeaderboard(period, prevWeek, prevDay);
+  const rows = await getHireLeaderboard(period, prevWeek, prevDay, prevMonth);
   const personal = {};
   for (const r of rows) personal[r.recruiter_id] = (personal[r.recruiter_id] || 0) + r.count;
   const periodTotal = Object.values(personal).reduce((s, v) => s + v, 0);
@@ -152,17 +153,11 @@ async function buildRecruitingLeaderboardEmbed(period, prevWeek = false, prevDay
   const baseEntries   = rollupBaseShop(tree, personal);
   const masterEntries = rollupMaster(tree, personal);
 
-  const monthName = new Date().toLocaleString('en-US', { month: 'long' }).toUpperCase();
-  const year = new Date().getFullYear();
-
-  let title = '';
-  if (period === 'daily')   title = prevDay  ? `🌱 OFG RECRUITING LEADERBOARD — YESTERDAY` : `🌱 OFG RECRUITING LEADERBOARD — TODAY`;
-  if (period === 'weekly')  title = prevWeek ? `🌱 OFG RECRUITING LEADERBOARD — LAST WEEK` : `🌱 OFG RECRUITING LEADERBOARD — THIS WEEK`;
-  if (period === 'monthly') title = `🌱 OFG RECRUITING LEADERBOARD — ${monthName} ${year}`;
+  const title = buildBoardTitle('recruiting', period, prevWeek, prevDay, prevMonth);
 
   const embed = new EmbedBuilder().setColor(PERIOD_COLORS[period] || CARD_COLOR).setTitle(title).setTimestamp();
 
-  const monthlyTotal = await getMonthlyHireTotal();
+  const monthlyTotal = await getMonthlyHireTotal(prevMonth);
   const goal = await getHireGoal();
 
   if (period === 'daily') {
@@ -202,7 +197,7 @@ async function buildRecruitingLeaderboardEmbed(period, prevWeek = false, prevDay
   }
 
   // Hires by Source (reflects the period being shown)
-  const sourceCounts = await getHireSourceCounts(period, prevWeek, prevDay);
+  const sourceCounts = await getHireSourceCounts(period, prevWeek, prevDay, prevMonth);
   const sourceLine = buildSourceLine(sourceCounts);
   if (sourceLine) {
     embed.addFields({ name: '🔗 Hires by Source', value: sourceLine, inline: false });
@@ -219,18 +214,18 @@ async function buildRecruitingLeaderboardEmbed(period, prevWeek = false, prevDay
 
   // Master Agency
   if (masterEntries.length) {
-    for (const f of chunkFields(rankLines(tree, masterEntries), '🏛️ Master Agency Leaderboard')) embed.addFields(f);
+    for (const f of chunkFields(rankLines(tree, masterEntries), '🏛️ Master Agency · 🌱 Hires')) embed.addFields(f);
   } else {
-    embed.addFields({ name: '🏛️ Master Agency Leaderboard', value: '*No hires logged yet for this period.*', inline: false });
+    embed.addFields({ name: '🏛️ Master Agency · 🌱 Hires', value: '*No hires logged yet for this period.*', inline: false });
   }
 
   embed.addFields({ name: '\u200b', value: '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', inline: false });
 
   // Base Shop
   if (baseEntries.length) {
-    for (const f of chunkFields(rankLines(tree, baseEntries), '🏢 Base Shop Leaderboard')) embed.addFields(f);
+    for (const f of chunkFields(rankLines(tree, baseEntries), '🏢 Base Shop · 🌱 Hires')) embed.addFields(f);
   } else {
-    embed.addFields({ name: '🏢 Base Shop Leaderboard', value: '*No hires logged yet for this period.*', inline: false });
+    embed.addFields({ name: '🏢 Base Shop · 🌱 Hires', value: '*No hires logged yet for this period.*', inline: false });
   }
 
   embed.setFooter({ text: 'OFG - Recruiting Tracker' });
@@ -358,15 +353,19 @@ const recruitingLeaderboardCommand = {
     .setDescription('View the recruiting / hiring leaderboard')
     .addStringOption(opt => opt.setName('period').setDescription('Time period').setRequired(false)
       .addChoices(
-        { name: 'Daily',     value: 'daily' },
-        { name: 'Yesterday', value: 'yesterday' },
-        { name: 'Weekly',    value: 'weekly' },
-        { name: 'Monthly',   value: 'monthly' },
+        { name: 'Daily',      value: 'daily' },
+        { name: 'Yesterday',  value: 'yesterday' },
+        { name: 'Weekly',     value: 'weekly' },
+        { name: 'Last Week',  value: 'lastweek' },
+        { name: 'Monthly',    value: 'monthly' },
+        { name: 'Last Month', value: 'lastmonth' },
       )),
   async execute(interaction) {
     await interaction.deferReply();
     const period = interaction.options.getString('period') || 'monthly';
     if (period === 'yesterday') return interaction.editReply({ embeds: [await buildRecruitingLeaderboardEmbed('daily', false, true)] });
+    if (period === 'lastweek')  return interaction.editReply({ embeds: [await buildRecruitingLeaderboardEmbed('weekly', true, false)] });
+    if (period === 'lastmonth') return interaction.editReply({ embeds: [await buildRecruitingLeaderboardEmbed('monthly', false, false, true)] });
     await interaction.editReply({ embeds: [await buildRecruitingLeaderboardEmbed(period)] });
   },
 };
