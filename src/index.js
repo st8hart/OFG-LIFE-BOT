@@ -208,10 +208,12 @@ async function handleSaleModal(interaction) {
   await interaction.deferReply({ ephemeral: true });
 
   try {
-    const carrier          = interaction.fields.getTextInputValue('carrier').trim();
-    const product          = interaction.fields.getTextInputValue('product').trim();
+    // Presentation / Carrier / Product are fixed dropdown picks encoded in the
+    // customId as "saleModal:<presentation>|<carrier>|<product>". Only Lead Type
+    // and AP come from the modal's text inputs.
+    const encoded = interaction.customId.slice('saleModal:'.length);
+    const [presentationType = 'Unknown', carrier = 'Unknown', product = 'Unknown'] = encoded.split('|');
     const leadType         = interaction.fields.getTextInputValue('leadType').trim();
-    const presentationType = interaction.customId.split(':')[1] || 'Unknown';
     const premiumRaw       = interaction.fields.getTextInputValue('premium').trim();
     const premium = parseFloat(premiumRaw.replace(/[$,]/g, ''));
     if (isNaN(premium) || premium <= 0) {

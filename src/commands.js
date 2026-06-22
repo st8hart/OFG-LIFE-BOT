@@ -14,9 +14,39 @@ const { buildLeaderboardEmbed, formatMoney } = require('./leaderboard');
 
 // ── /sale ─────────────────────────────────────────────────────────────────────
 // NOTE: Discord modals only support text inputs — no dropdowns inside a modal.
-// Presentation Type is a required slash-command option (real Discord dropdown)
-// chosen BEFORE the modal opens. The selection is encoded in the modal customId
-// (e.g. "saleModal:APT") so handleSaleModal can read it on submit.
+// Anything that should be a FIXED, pick-from-a-list value (Presentation Type,
+// Carrier, Product) is a required slash-command option (a real Discord dropdown)
+// chosen BEFORE the modal opens. Those three selections are encoded in the modal
+// customId — "saleModal:<presentation>|<carrier>|<product>" — so handleSaleModal
+// can read them on submit. The modal itself only collects the free-text fields
+// that change every time (Lead Type, Submitted AP).
+//
+// To change the dropdown options later, edit ONLY the two arrays below — the
+// command picks them up automatically. (Discord allows up to 25 choices each.)
+const SALE_CARRIERS = [
+  'Mutual of Omaha',
+  'Transamerica',
+  'United Home Life',
+  'American Home Life',
+  'AHL Patriot Series',
+  'American Amicable',
+  'Occidental',
+  'Americo',
+  'Foresters',
+  'Banner',
+  'SBLI',
+  'NLG',
+  'GPM',
+  'Liberty Bankers',
+];
+
+const SALE_PRODUCTS = [
+  'FEX',
+  'IUL',
+  'TERM',
+  'TERM ROP',
+];
+
 const saleCommand = {
   data: new SlashCommandBuilder()
     .setName('sale')
@@ -30,24 +60,30 @@ const saleCommand = {
           { name: 'One Call Close', value: 'One Call Close' },
           { name: 'In Home',        value: 'In Home' },
         )
+    )
+    .addStringOption(opt =>
+      opt.setName('carrier')
+        .setDescription('Which carrier was the policy written with?')
+        .setRequired(true)
+        .addChoices(...SALE_CARRIERS.map(c => ({ name: c, value: c })))
+    )
+    .addStringOption(opt =>
+      opt.setName('product')
+        .setDescription('Which product type?')
+        .setRequired(true)
+        .addChoices(...SALE_PRODUCTS.map(p => ({ name: p, value: p })))
     ),
   async execute(interaction) {
     const presentationType = interaction.options.getString('presentation_type');
-    // Encode the selection in customId so it survives the modal round-trip
-    const modal = new ModalBuilder().setCustomId(`saleModal:${presentationType}`).setTitle('Log New Sale - OFG');
+    const carrier          = interaction.options.getString('carrier');
+    const product          = interaction.options.getString('product');
+    // Encode all three fixed selections in the customId so they survive the
+    // modal round-trip. None of the option values contain ':' or '|', so this
+    // is safe to split back apart in handleSaleModal.
+    const modal = new ModalBuilder()
+      .setCustomId(`saleModal:${presentationType}|${carrier}|${product}`)
+      .setTitle('Log New Sale - OFG');
     modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('carrier').setLabel('Carrier')
-          .setStyle(TextInputStyle.Short)
-          .setPlaceholder('e.g. Mutual of Omaha, MOO, Transamerica, UHL')
-          .setRequired(true)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('product').setLabel('Product')
-          .setStyle(TextInputStyle.Short)
-          .setPlaceholder('e.g. IUL, Term Life, Final Expense')
-          .setRequired(true)
-      ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder().setCustomId('leadType').setLabel('Lead Type')
           .setStyle(TextInputStyle.Short)
