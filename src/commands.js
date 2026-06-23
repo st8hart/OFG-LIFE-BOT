@@ -61,6 +61,7 @@ const saleCommand = {
           { name: 'APT',            value: 'APT' },
           { name: 'One Call Close', value: 'One Call Close' },
           { name: 'In Home',        value: 'In Home' },
+          { name: 'Follow Up',      value: 'Follow Up' },
         )
     )
     .addStringOption(opt =>
