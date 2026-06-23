@@ -42,6 +42,8 @@ const SALE_CARRIERS = [
 
 const SALE_PRODUCTS = [
   'FEX',
+  'Graded FEX',
+  'Guaranteed Issue',
   'IUL',
   'TERM',
   'TERM ROP',
