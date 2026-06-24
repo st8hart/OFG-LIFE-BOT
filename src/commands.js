@@ -263,7 +263,7 @@ const setGoalCommand = {
 };
 
 // ── /challenge ────────────────────────────────────────────────────────────────
-const { createChallenge, getActiveChallenge, getDailyChallengeCount, getDailyChallengeWith, getChallengeStandings } = require('./database');
+const { createChallenge, getActiveChallenge, getDailyChallengeCount, getDailyChallengeWith, getChallengeStandings, getHeadToHead } = require('./database');
 
 const challengeCommand = {
   data: new SlashCommandBuilder()
@@ -309,6 +309,21 @@ const challengeCommand = {
       target.displayName || target.username
     );
 
+    // Head-to-head record going INTO this duel (the new row is still 'active',
+    // so it isn't counted). Only decisive past duels count.
+    const h2h = await getHeadToHead(interaction.user.id, target.id);
+    let h2hLine;
+    if (h2h.total === 0) {
+      h2hLine = `🆕 First time these two square off!`;
+    } else if (h2h.aWins === h2h.bWins) {
+      h2hLine = `📊 Head-to-head: all square at ${h2h.aWins}-${h2h.bWins}`;
+    } else {
+      const leaderId = h2h.aWins > h2h.bWins ? interaction.user.id : target.id;
+      const hi = Math.max(h2h.aWins, h2h.bWins);
+      const lo = Math.min(h2h.aWins, h2h.bWins);
+      h2hLine = `📊 Head-to-head: <@${leaderId}> leads ${hi}-${lo}`;
+    }
+
     const remaining = 3 - (dailyCount + 1);
     await interaction.reply({
       content: [
@@ -317,6 +332,7 @@ const challengeCommand = {
         ``,
         `<@${interaction.user.id}> just challenged <@${target.id}> to a sales battle!`,
         `Who closes more AP by end of day? 👀💰`,
+        h2hLine,
         `May the best agent win! 💪`,
         ``,
         remaining > 0 ? `🎯 You have **${remaining}** challenge slot${remaining !== 1 ? 's' : ''} remaining today.` : `🎯 That's your 3rd challenge today — you're all in! 🔥`,

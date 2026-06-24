@@ -6,7 +6,7 @@ const {
   getUserTotalSales, getDailySalesCount, getTeamDailySalesCount, getMonthlyTopSale, getPersonalBestSale,
   expireChallenges,
   determineChallengeWinners, getPendingChallengeResults, clearPendingChallengeResults, getAllAgentFirstSales,
-  getChallengeStandings, getActiveChallenges,
+  getChallengeStandings, getActiveChallenges, getHeadToHead,
   getMonthlyChampion, getWeeklyMVP,
   getAllTimeRecords, setAllTimeRecord, getMonthlyRecords,
   getUserDailyTotal, getUserWeeklyTotal,
@@ -30,7 +30,7 @@ const {
 } = require('./commands');
 const { buildTeamLeaderboardEmbed, teamLeaderboardCommand, teamAssignCommand, teamRemoveCommand, teamSetupCommand } = require('./team-leaderboard');
 const {
-  buildRecruitingLeaderboardEmbed,
+  buildRecruitingLeaderboardEmbed, computeRecruitingMVPs,
   addHireCommand, recruitingLeaderboardCommand, setHireGoalCommand,
   handleHireModal,
 } = require('./recruiting-leaderboard');
@@ -780,6 +780,23 @@ function scheduleLeaderboards(client) {
         if (results.length && channelId) {
           const ch = await client.channels.fetch(channelId);
           for (const result of results) {
+            // Overall series record between these two. At decisive close the
+            // just-resolved duel is already tagged, so this INCLUDES last night.
+            // (Ties don't change the record — status='tied' isn't counted.)
+            const h2h = await getHeadToHead(result.winner.id, result.loser.id);
+            let seriesLine = null;
+            if (h2h.total > 0) {
+              if (h2h.aWins === h2h.bWins) {
+                seriesLine = `📊 Series: all even now, ${h2h.aWins}-${h2h.bWins}`;
+              } else if (h2h.aWins > h2h.bWins) {
+                // winner is ahead in the all-time series
+                seriesLine = `📊 Series: <@${result.winner.id}> leads it ${h2h.aWins}-${h2h.bWins}`;
+              } else {
+                // winner took last night but still TRAILS overall — the needle line
+                seriesLine = `📊 Series: <@${result.loser.id}> still owns this matchup ${h2h.bWins}-${h2h.aWins}`;
+              }
+            }
+
             if (result.tie) {
               await ch.send([
                 ``,
@@ -788,6 +805,7 @@ function scheduleLeaderboards(client) {
                 `<@${result.winner.id}> vs <@${result.loser.id}> — both finished with **${formatMoney(result.winner.total)}** AP!`,
                 ``,
                 `Dead even. Both of you went to WAR yesterday — respect. 💪`,
+                ...(seriesLine ? [seriesLine] : []),
                 `Rematch? Run it back. 🔥`,
                 ``,
               ].join('\n'));
@@ -800,6 +818,7 @@ function scheduleLeaderboards(client) {
                 ``,
                 `👑 WINNER: <@${result.winner.id}> — **${formatMoney(result.winner.total)}** AP`,
                 `😤 Runner Up: <@${result.loser.id}> — **${formatMoney(result.loser.total)}** AP`,
+                ...(seriesLine ? [``, seriesLine] : []),
                 ``,
                 `That's what it looks like when you CLOSE under pressure. Bow out or run it back! 🔥`,
                 ``,
@@ -1007,7 +1026,16 @@ function scheduleLeaderboards(client) {
     // Daily recap — 8am (yesterday's hires), skips Monday
     if (hour === 8 && min === 0 && day !== 1 && !lastPosted[key('recruit-final-daily')]) {
       lastPosted[key('recruit-final-daily')] = true;
-      postRecruitingLeaderboard('daily', `🌱 **OFG RECRUITING RECAP — YESTERDAY'S HIRES** 🌱`, false, true, true);
+      postRecruitingLeaderboard('daily', [
+        ``,
+        `🌱🔥 YESTERDAY'S RECRUITING RESULTS ARE IN! 🔥🌱`,
+        ``,
+        `While others were watching, OFG was BUILDING. 🏗️💪`,
+        `Every conversation, every interview, every contract signed — it all COUNTS.`,
+        ``,
+        `⬇️ Here's who grew the empire yesterday. Salute to everyone recruiting! 🫡`,
+        ``,
+      ].join('\n'), false, true, true);
     }
 
     // Weekly — 9am, skips Monday
@@ -1019,7 +1047,58 @@ function scheduleLeaderboards(client) {
     // Final weekly — Monday 8am (last week locked in)
     if (day === 1 && hour === 8 && min === 0 && !lastPosted[key('recruit-final-weekly')]) {
       lastPosted[key('recruit-final-weekly')] = true;
-      postRecruitingLeaderboard('weekly', `🌱 **OFG RECRUITING RECAP — LAST WEEK LOCKED IN** 🌱`, true, false, true);
+      postRecruitingLeaderboard('weekly', [
+        ``,
+        `🚨🏁 THE RECRUITING WEEK IS LOCKED IN! 🏁🚨`,
+        ``,
+        `Seven days of building, interviewing, and zero excuses — THIS board shows who grew their empire. 🌱💪`,
+        ``,
+        `👑 FINAL RECRUITING STANDINGS — officially LOCKED IN. 👑`,
+        ``,
+        `Now reload. The empire never stops growing. 🏗️🔥`,
+        ``,
+      ].join('\n'), true, false, true);
+    }
+
+    // Recruiting MVPs — Monday 8:05am, leaders channel (mirrors the producer Weekly MVP).
+    if (day === 1 && hour === 8 && min === 5 && !lastPosted[key('recruit-mvp')]) {
+      lastPosted[key('recruit-mvp')] = true;
+      try {
+        const channelId = process.env.RECRUITING_CHANNEL_ID;
+        if (channelId) {
+          const ch = await client.channels.fetch(channelId);
+          const { individual, baseShop } = await computeRecruitingMVPs(true); // true = last week
+          if (individual) {
+            await ch.send([
+              ``,
+              `👑 RECRUITING MVP OF THE WEEK 👑`,
+              ``,
+              `After a full week of building, one recruiter stood above the rest...`,
+              ``,
+              `🌱 <@${individual.id}> — **${individual.count} hire${individual.count === 1 ? '' : 's'} this week!**`,
+              `${individual.rankEmoji} ${individual.rankName} — absolutely ELITE recruiting!`,
+              ``,
+              `Let's keep that same energy this week! 🔥`,
+              ``,
+            ].join('\n'));
+          }
+          if (baseShop) {
+            const shopLabel = baseShop.isMention ? `<@${baseShop.id}>'s Base Shop` : `**${baseShop.name}'s Base Shop**`;
+            await ch.send([
+              ``,
+              `🏆 TOP BASE SHOP OF THE WEEK 🏆`,
+              ``,
+              `One shop out-recruited them all last week...`,
+              ``,
+              `🏢 ${shopLabel} — **${baseShop.count} hire${baseShop.count === 1 ? '' : 's'}!**`,
+              `That's a team that builds together. 🌱👑`,
+              ``,
+              `Who's taking the crown next week? 🔥`,
+              ``,
+            ].join('\n'));
+          }
+        }
+      } catch (err) { console.error('Recruiting MVP error:', err.message); }
     }
 
     // Monthly — Mon/Wed/Fri 10am

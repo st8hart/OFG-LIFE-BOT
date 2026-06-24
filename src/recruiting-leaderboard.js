@@ -17,6 +17,7 @@ const {
   getTeamTree,
   addHire, getHireLeaderboard, getHireSourceCounts, getMonthlyHireTotal, getUserHireStats, getHireGoal, setHireGoal,
   getRecruiterRankForCount, getMonthlyRecruitCountsMap, getReigningRecruiterId, getBestRecruitingDayMap, getRecruiterDailyCount,
+  getTeamDailyHireCount, getAllTimeHireRecords, setAllTimeHireRecord,
 } = require('./database');
 const { buildBoardTitle, buildBoardColor } = require('./board-titles');
 
@@ -81,11 +82,31 @@ function teamBadgeEmoji(monthlyHires) {
   if (monthlyHires >= 25)  return '🛡️';
   return '';
 }
-// Daily streak shoutout tiers (3+ hires in a day) — escalating emoji.
-function dailyStreakMilestone(count) {
-  if (count < 3) return null;
-  const emoji = count >= 10 ? '🌌' : count >= 7 ? '⚡' : count >= 5 ? '💥' : '🎆';
-  return { emoji, count };
+// Multi-hire-in-a-day blast (2+ hires logged by the same recruiter today).
+// Escalating tiers — the more they sign in one day, the louder it gets.
+function multiHireBlast(uplineId, count) {
+  if (count < 2) return null;
+  let header, line;
+  if (count === 2) {
+    header = '🎇 DOUBLE UP! 🎇';
+    line = `<@${uplineId}> just signed their **2nd recruit today** — two in one day is how you build. 🌱`;
+  } else if (count === 3) {
+    header = '🎆 HAT TRICK! 🎆';
+    line = `<@${uplineId}> is locked in — **3 recruits today!** The empire is growing by the hour. 🏗️🔥`;
+  } else if (count === 4) {
+    header = '🧨 RECRUITING RAMPAGE! 🧨';
+    line = `<@${uplineId}> just logged their **4th recruit today** — a one-person talent machine. 🚀`;
+  } else if (count <= 6) {
+    header = '💥 ON A HEATER! 💥';
+    line = `<@${uplineId}> is UNREAL — **${count} recruits today!** Somebody check the water over there. 🌱🔥`;
+  } else if (count <= 9) {
+    header = '⚡ ABSOLUTELY UNSTOPPABLE! ⚡';
+    line = `<@${uplineId}> just hit **${count} recruits in a single day.** This is a recruiting clinic. 🏛️👑`;
+  } else {
+    header = '🌌 GODMODE ACTIVATED! 🌌';
+    line = `<@${uplineId}> has signed **${count} recruits TODAY.** We may never see this again — bow down. 🌎🏆🔥`;
+  }
+  return ['', header, '', line, ''].join('\n');
 }
 
 // @mention real Discord ids; show the stored name for virtual/grouping nodes.
@@ -414,27 +435,92 @@ async function handleHireModal(interaction, client) {
         // stats.monthly_count already includes the hire we just logged.
         const monthlyCount = stats.monthly_count;
 
-        // 1) RANK UP — crossed a tier (5 / 10 / 25 / 50 / 100).
+        // 1) FIRST BLOOD — the very first hire logged team-wide today.
+        const teamToday = await getTeamDailyHireCount();
+        if (teamToday === 1) {
+          await channel.send([
+            ``,
+            `🌱 FIRST BLOOD! 🌱`,
+            ``,
+            `<@${uplineId}> just put the **first recruit on the board today** — welcome **${name}** to OFG!`,
+            `The hunt for talent is ON. Who's next? 🏗️🔥`,
+            ``,
+          ].join('\n'));
+        }
+
+        // 2) RANK UP — crossed a tier (5 / 10 / 25 / 50 / 100).
         const before = getRecruiterRankForCount(monthlyCount - 1);
         const after  = getRecruiterRankForCount(monthlyCount);
         if (after.id > before.id) {
-          await channel.send(
-            `${after.emoji} **RANK UP!** <@${uplineId}> just reached **${after.name}** ` +
-            `with **${monthlyCount} recruits** this month! The empire grows. 🌱`
-          );
+          await channel.send([
+            ``,
+            `⬆️🌱 RANK UP! 🌱⬆️`,
+            ``,
+            `<@${uplineId}> just leveled up to ${after.emoji} **${after.name}**!`,
+            `From ${before.emoji} ${before.name} to ${after.emoji} ${after.name} — the empire grows! 🔥`,
+            `*(${monthlyCount} recruits this month and climbing.)*`,
+            ``,
+          ].join('\n'));
         }
 
-        // 2) DAILY STREAK — 3+ hires logged today.
+        // 3) MULTI-HIRE BLAST — 2+ hires logged by this recruiter today.
         const dailyCount = await getRecruiterDailyCount(uplineId);
-        const streak = dailyStreakMilestone(dailyCount);
-        if (streak) {
-          await channel.send(
-            `${streak.emoji} <@${uplineId}> is recruiting like a machine — ` +
-            `**${dailyCount} new recruits today!** Who's keeping up? 🌱🔥`
-          );
+        const blast = multiHireBlast(uplineId, dailyCount);
+        if (blast) await channel.send(blast);
+
+        // 4) ALL-TIME HIRE RECORDS — biggest day / week / month ever (mirrors the
+        //    producer all-time record posts). stats already includes this hire.
+        const hireRecords = await getAllTimeHireRecords();
+
+        if (stats.daily_count > parseInt(hireRecords.alltime_hireday_count || 0, 10)) {
+          const prev = hireRecords.alltime_hireday_username
+            ? `Previous record: ${hireRecords.alltime_hireday_count} hires by ${hireRecords.alltime_hireday_username}`
+            : 'First all-time record set!';
+          await setAllTimeHireRecord('day', stats.daily_count, uplineId, uplineName);
+          await channel.send([
+            ``,
+            `🌟 ALL-TIME RECRUITING DAY RECORD BROKEN! 🌟`,
+            ``,
+            `<@${uplineId}> just had the BIGGEST RECRUITING DAY in OFG history — **${stats.daily_count} hires in a single day!**`,
+            `That's empire-builder status. 🏗️👑🔥`,
+            prev,
+            ``,
+          ].join('\n'));
         }
 
-        // 3) AUTO-GROW GOAL — team total crossed the monthly goal → bump +25.
+        if (stats.weekly_count > parseInt(hireRecords.alltime_hireweek_count || 0, 10)) {
+          const prev = hireRecords.alltime_hireweek_username
+            ? `Previous record: ${hireRecords.alltime_hireweek_count} hires by ${hireRecords.alltime_hireweek_username}`
+            : 'First all-time record set!';
+          await setAllTimeHireRecord('week', stats.weekly_count, uplineId, uplineName);
+          await channel.send([
+            ``,
+            `🌟 ALL-TIME RECRUITING WEEK RECORD BROKEN! 🌟`,
+            ``,
+            `<@${uplineId}> just posted the BIGGEST RECRUITING WEEK in OFG history — **${stats.weekly_count} hires this week!**`,
+            `Absolutely UNSTOPPABLE. 🌱🔥`,
+            prev,
+            ``,
+          ].join('\n'));
+        }
+
+        if (stats.monthly_count > parseInt(hireRecords.alltime_hiremonth_count || 0, 10)) {
+          const prev = hireRecords.alltime_hiremonth_username
+            ? `Previous record: ${hireRecords.alltime_hiremonth_count} hires by ${hireRecords.alltime_hiremonth_username}`
+            : 'First all-time record set!';
+          await setAllTimeHireRecord('month', stats.monthly_count, uplineId, uplineName);
+          await channel.send([
+            ``,
+            `🌟 ALL-TIME RECRUITING MONTH RECORD BROKEN! 🌟`,
+            ``,
+            `<@${uplineId}> just built the BIGGEST RECRUITING MONTH in OFG history — **${stats.monthly_count} hires!**`,
+            `This is what LEGEND status looks like at OFG. 🌎👑🏆`,
+            prev,
+            ``,
+          ].join('\n'));
+        }
+
+        // 5) AUTO-GROW GOAL — team total crossed the monthly goal → bump +25.
         const monthlyTeamTotal = await getMonthlyHireTotal();
         let goal = await getHireGoal();
         if (monthlyTeamTotal >= goal) {
@@ -498,7 +584,39 @@ const setHireGoalCommand = {
   },
 };
 
+// ── Weekly recruiting MVPs (individual + base shop) ──────────────────────────────
+// Top recruiter and top base shop by hires for a week. Default = last week, to
+// mirror the producer Weekly MVP that announces the week just finished.
+async function computeRecruitingMVPs(prevWeek = true) {
+  const tree = await getTeamTree();
+  const rows = await getHireLeaderboard('weekly', prevWeek, false, false);
+  const monthlyMap = await getMonthlyRecruitCountsMap(false);
+
+  let individual = null;
+  if (rows.length) {
+    const top = rows[0];
+    const rank = getRecruiterRankForCount(monthlyMap[top.recruiter_id] || 0);
+    individual = { id: top.recruiter_id, count: top.count, rankEmoji: rank.emoji, rankName: rank.name };
+  }
+
+  const personal = {};
+  for (const r of rows) personal[r.recruiter_id] = (personal[r.recruiter_id] || 0) + r.count;
+  const baseEntries = rollupBaseShop(tree, personal);
+  let baseShop = null;
+  if (baseEntries.length) {
+    const top = baseEntries[0];
+    const p = tree.getPerson(top.id);
+    baseShop = {
+      id: top.id,
+      count: top.total,
+      name: p ? p.name : String(top.id),
+      isMention: /^\d{5,}$/.test(top.id),
+    };
+  }
+  return { individual, baseShop };
+}
+
 module.exports = {
-  buildRecruitingLeaderboardEmbed, buildHireCard, handleHireModal,
+  buildRecruitingLeaderboardEmbed, buildHireCard, handleHireModal, computeRecruitingMVPs,
   addHireCommand, recruitingLeaderboardCommand, setHireGoalCommand,
 };

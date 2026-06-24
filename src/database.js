@@ -594,6 +594,27 @@ async function clearPendingChallengeResults() {
   await supabase.from('settings').delete().eq('key', 'pending_challenge_results');
 }
 
+// Head-to-head record between two agents, computed from tagged duel rows.
+// Counts decisive (status='closed') duels in EITHER direction; ties are
+// excluded. Returns wins keyed to the two ids you pass in.
+//   getHeadToHead(A, B) -> { aWins, bWins, total }
+async function getHeadToHead(idA, idB) {
+  const { data, error } = await supabase.from('challenges')
+    .select('winner_id')
+    .eq('status', 'closed')
+    .or(`and(challenger_id.eq.${idA},challengee_id.eq.${idB}),and(challenger_id.eq.${idB},challengee_id.eq.${idA})`);
+  if (error) {
+    console.error('[challenges] getHeadToHead failed:', error.message || error);
+    return { aWins: 0, bWins: 0, total: 0 };
+  }
+  let aWins = 0, bWins = 0;
+  for (const row of (data || [])) {
+    if (row.winner_id === idA) aWins++;
+    else if (row.winner_id === idB) bWins++;
+  }
+  return { aWins, bWins, total: aWins + bWins };
+}
+
 // ── Anniversaries ─────────────────────────────────────────────────────────────
 
 async function getFirstSaleDate(userId) {
@@ -1110,9 +1131,45 @@ async function getRecruiterDailyCount(recruiterId) {
   return data.length;
 }
 
+// Team-wide hires logged today (Central) — used to detect the first hire of the day.
+async function getTeamDailyHireCount() {
+  const start = getDayStart();
+  const { data, error } = await supabase.from('hires').select('id')
+    .gte('created_at', start.toISOString());
+  if (error) return 0;
+  return data.length;
+}
+
+// ── All-time HIRE records (day / week / month) ────────────────────────────────
+// Mirrors the producer all-time records, but counts hires. Stored in settings.
+async function getAllTimeHireRecords() {
+  const { data, error } = await supabase.from('settings').select('key, value')
+    .in('key', ['alltime_hireday_count',   'alltime_hireday_user',   'alltime_hireday_username',
+                'alltime_hireweek_count',  'alltime_hireweek_user',  'alltime_hireweek_username',
+                'alltime_hiremonth_count', 'alltime_hiremonth_user', 'alltime_hiremonth_username']);
+  if (error) {
+    console.error('[hires] getAllTimeHireRecords failed:', error.message || error);
+    return {};
+  }
+  const out = {};
+  for (const row of (data || [])) out[row.key] = row.value;
+  return out;
+}
+
+async function setAllTimeHireRecord(type, count, userId, username) {
+  const rows = [
+    { key: `alltime_hire${type}_count`,    value: String(count) },
+    { key: `alltime_hire${type}_user`,     value: userId },
+    { key: `alltime_hire${type}_username`, value: username },
+  ];
+  const { error } = await supabase.from('settings').upsert(rows);
+  if (error) console.error(`[hires] setAllTimeHireRecord(${type}) failed:`, error.message || error);
+}
+
 module.exports = {
   addHire, getHireLeaderboard, getHireSourceCounts, getMonthlyHireTotal, getUserHireStats, getHireGoal, setHireGoal,
   getRecruiterRanks, getRecruiterRankForCount, getMonthlyRecruitCountsMap, getReigningRecruiterId, getBestRecruitingDayMap, getRecruiterDailyCount,
+  getTeamDailyHireCount, getAllTimeHireRecords, setAllTimeHireRecord,
   getTeamTree, getTeamMembersRaw, upsertTeamMember, removeTeamMember, ensureAgencyNode,
   recordUnassignedProducer, removeUnassignedProducer,
   addSale, getLeaderboard, getMonthlyTotal, getMonthlyTotalsMap, getBestDailyBadgesMap, getUserStats, getTeamStats,
@@ -1121,7 +1178,7 @@ module.exports = {
   createChallenge, getActiveChallenge, getActiveChallenges, getAllActiveChallenges, expireChallenges,
   closeChallengeRow,
   getDailyChallengeCount, getDailyChallengeWith, updateChallengeRecord, getChallengeStandings,
-  determineChallengeWinners, getPendingChallengeResults, clearPendingChallengeResults,
+  determineChallengeWinners, getPendingChallengeResults, clearPendingChallengeResults, getHeadToHead,
   getAllAgentFirstSales, getMonthlyChampion, getWeeklyMVP,
   getAllTimeRecords, setAllTimeRecord, getMonthlyRecords,
   getUserDailyTotal, getUserWeeklyTotal,
