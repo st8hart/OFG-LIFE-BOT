@@ -283,7 +283,26 @@ const teamSetupCommand = {
   },
 };
 
+// ── Top Base Shop spotlight (by AP) for a given period ───────────────────────────
+// Used by the Monday "Top Base Shop of the Week" + 1st-of-month "Base Shop of the
+// Month" posts. Reuses the same base-shop rollup the team board runs.
+async function computeTeamMVPs(period = 'weekly', prevWeek = false, prevMonth = false) {
+  const tree = await getTeamTree();
+  const rows = await getLeaderboard(period, prevWeek, false, prevMonth);
+  const personal = {};
+  for (const r of rows) personal[r.user_id] = (personal[r.user_id] || 0) + r.total;
+
+  const baseEntries = rollupBaseShop(tree, personal);
+  let baseShop = null;
+  if (baseEntries.length) {
+    const e = baseEntries[0];
+    const p = tree.getPerson(e.id);
+    baseShop = { id: e.id, total: e.total, name: p ? p.name : String(e.id), isMention: /^\d{5,}$/.test(e.id) };
+  }
+  return { baseShop };
+}
+
 module.exports = {
-  buildTeamLeaderboardEmbed, formatMoney,
+  buildTeamLeaderboardEmbed, formatMoney, computeTeamMVPs,
   teamLeaderboardCommand, teamAssignCommand, teamRemoveCommand, teamSetupCommand,
 };

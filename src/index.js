@@ -28,7 +28,7 @@ const {
   resolveChallengesCommand,
   clearPendingChallengesCommand,
 } = require('./commands');
-const { buildTeamLeaderboardEmbed, teamLeaderboardCommand, teamAssignCommand, teamRemoveCommand, teamSetupCommand } = require('./team-leaderboard');
+const { buildTeamLeaderboardEmbed, computeTeamMVPs, teamLeaderboardCommand, teamAssignCommand, teamRemoveCommand, teamSetupCommand } = require('./team-leaderboard');
 const {
   buildRecruitingLeaderboardEmbed, computeRecruitingMVPs,
   addHireCommand, recruitingLeaderboardCommand, setHireGoalCommand,
@@ -482,6 +482,43 @@ async function handleSaleModal(interaction) {
         ].join('\n'));
       }
 
+      // ── CAREER AP MILESTONES (war room) — lifetime premium crossings ──
+      // Fires once per threshold: only when the previous lifetime total was below
+      // it and this sale pushes at/over it. Highest crossed wins (no double-post).
+      const apMilestones = [
+        { at: 1000000, msg: [
+          `👑 CAREER MILESTONE — $1,000,000 · OFG HALL OF FAME! 👑`, ``,
+          `<@${interaction.user.id}> just crossed **$1,000,000 in lifetime AP**! 💰💰💰`,
+          `A MILLION dollars in premium written — legend status, etched into OFG history forever. 🏆🌟🔥`,
+        ] },
+        { at: 500000, msg: [
+          `🔥 CAREER MILESTONE — HALF A MILLION! 🔥`, ``,
+          `<@${interaction.user.id}> just crossed **$500,000 in lifetime AP**!`,
+          `Halfway to a million. This is what relentless looks like. 👑💎`,
+        ] },
+        { at: 250000, msg: [
+          `🌟 CAREER MILESTONE — QUARTER MILLION! 🌟`, ``,
+          `<@${interaction.user.id}> just crossed **$250,000 in lifetime AP**!`,
+          `A quarter-million in premium. Elite company. 🏆💪`,
+        ] },
+        { at: 100000, msg: [
+          `💎 CAREER MILESTONE — SIX FIGURES! 💎`, ``,
+          `<@${interaction.user.id}> just crossed **$100,000 in lifetime AP**!`,
+          `Six figures of premium written. That's a real career taking shape. 👑🔥`,
+        ] },
+        { at: 50000, msg: [
+          `🏆 CAREER MILESTONE — $50K CLUB! 🏆`, ``,
+          `<@${interaction.user.id}> just crossed **$50,000 in lifetime AP**! 💰`,
+          `The grind is paying off — and this is only the beginning. 🚀`,
+        ] },
+      ];
+      const lifetimeAP = stats?.total_ever || 0;
+      const prevAP = lifetimeAP - parseFloat(premium || 0);
+      const crossedAP = apMilestones.find(m => prevAP < m.at && lifetimeAP >= m.at);
+      if (crossedAP) {
+        await channel.send(['', ...crossedAP.msg, ''].join('\n'));
+      }
+
     } catch (err) {
       console.error('Sales channel error:', err.message);
     }
@@ -690,10 +727,20 @@ function scheduleLeaderboards(client) {
     } catch (err) { console.error('Recruiting leaderboard error:', err.message); }
   };
 
-  // Daily every 2hrs 12pm-midnight Central
+  // Weekend posting rule (shared by every recurring daily/weekly board):
+  //   • Sunday  → no posts at all.
+  //   • Saturday → posts stop after 6:00 PM (hour 18 is the last allowed).
+  // Monthly recaps and Monday / 1st-of-month milestones are exempt (handled below).
+  const weekendBlocked = (day, hour) => day === 0 || (day === 6 && hour > 18);
+
+  // Daily every 2hrs 12pm-midnight Central.
   setInterval(() => {
-    const hour = getCentralHour();
-    if (hour >= 12 && hour < 24) postLeaderboard('daily');
+    const centralNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+    const hour = centralNow.getHours();
+    const day  = centralNow.getDay();
+    if (hour < 12 || hour >= 24) return;
+    if (weekendBlocked(day, hour)) return;
+    postLeaderboard('daily');
   }, 2 * 60 * 60 * 1000);
 
   // Minute checker for exact times
@@ -864,7 +911,7 @@ function scheduleLeaderboards(client) {
     }
 
     // Final Daily at 8am — skip Monday (too hectic with weekly announcements)
-    if (hour === 8 && min === 0 && day !== 1 && !lastPosted[key('final-daily')]) {
+    if (hour === 8 && min === 0 && day !== 1 && !weekendBlocked(day, hour) && !lastPosted[key('final-daily')]) {
       lastPosted[key('final-daily')] = true;
       postFinalLeaderboard('daily', [
         ``,
@@ -879,7 +926,7 @@ function scheduleLeaderboards(client) {
     }
 
     // Weekly at 9am except Monday
-    if (hour === 9 && min === 0 && day !== 1 && !lastPosted[key('weekly')]) {
+    if (hour === 9 && min === 0 && day !== 1 && !weekendBlocked(day, hour) && !lastPosted[key('weekly')]) {
       lastPosted[key('weekly')] = true;
       postLeaderboard('weekly');
     }
@@ -966,6 +1013,42 @@ function scheduleLeaderboards(client) {
       } catch (err) { console.error('New month goal reminder error:', err.message); }
     }
 
+    // Mid-month goal check — 15th at 12:00pm (noon), @everyone, war room.
+    // Once-a-month milestone ping → exempt from the weekend rule (fires on the 15th
+    // regardless of weekday).
+    if (now.getDate() === 15 && hour === 12 && min === 0 && !lastPosted[key('mid-month-goals')]) {
+      lastPosted[key('mid-month-goals')] = true;
+      try {
+        const salesChannelId = process.env.SALES_CHANNEL_ID;
+        if (salesChannelId) {
+          const ch = await client.channels.fetch(salesChannelId);
+          const monthName = now.toLocaleString('en-US', { month: 'long' }).toUpperCase();
+          await ch.send([
+            `@everyone`,
+            ``,
+            `🎯🔥 MID-MONTH GOAL CHECK — ${monthName} 🔥🎯`,
+            ``,
+            `We're halfway through ${monthName} — time to make sure EVERYONE is locked in. 💪`,
+            ``,
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+            `❓ **HAVEN'T SET YOUR GOAL YET?**`,
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+            ``,
+            `If you haven't set your personal production goal for ${monthName}, do it RIGHT NOW:`,
+            ``,
+            `👉 \`/mypersonalgoal\``,
+            ``,
+            `Takes 10 seconds. Your goal stays private — only YOU see your progress — but it's what keeps you accountable when it counts. 🎯`,
+            ``,
+            `Already set yours? Then this is your mid-month gut check: on pace, or time to turn it up? 👀`,
+            ``,
+            `The team goal is **$${(await getGoal()).toLocaleString()}** — half the month's gone, let's finish ${monthName} on FIRE. 🔥👑`,
+            ``,
+          ].join('\n'));
+        }
+      } catch (err) { console.error('Mid-month goal reminder error:', err.message); }
+    }
+
     // Final Monthly on 1st at 8am
     if (now.getDate() === 1 && hour === 8 && min === 0 && !lastPosted[key('final-monthly')]) {
       lastPosted[key('final-monthly')] = true;
@@ -985,19 +1068,19 @@ function scheduleLeaderboards(client) {
 
     // ── TEAM / LEADERSHIP LEADERBOARDS ──────────────────────────────────────────
     // Intraday team board — 1pm / 5pm / 9pm Central (in the gaps the producer board leaves)
-    if ([13, 17, 21].includes(hour) && min === 0 && !lastPosted[key('team-daily')]) {
+    if ([13, 17, 21].includes(hour) && min === 0 && !weekendBlocked(day, hour) && !lastPosted[key('team-daily')]) {
       lastPosted[key('team-daily')] = true;
       postTeamLeaderboard('daily');
     }
 
     // Team daily recap — 8:02am, 2 min after producer final daily (skips Monday, like producer)
-    if (hour === 8 && min === 2 && day !== 1 && !lastPosted[key('team-final-daily')]) {
+    if (hour === 8 && min === 2 && day !== 1 && !weekendBlocked(day, hour) && !lastPosted[key('team-final-daily')]) {
       lastPosted[key('team-final-daily')] = true;
       postTeamLeaderboard('daily', `🏪 **OFG TEAM RECAP — YESTERDAY'S RESULTS** 🏪`, false, true, true);
     }
 
     // Team weekly — 9:02am, 2 min after producer weekly (not Monday)
-    if (hour === 9 && min === 2 && day !== 1 && !lastPosted[key('team-weekly')]) {
+    if (hour === 9 && min === 2 && day !== 1 && !weekendBlocked(day, hour) && !lastPosted[key('team-weekly')]) {
       lastPosted[key('team-weekly')] = true;
       postTeamLeaderboard('weekly');
     }
@@ -1020,11 +1103,65 @@ function scheduleLeaderboards(client) {
       postTeamLeaderboard('monthly', `🏛️ **OFG TEAM RECAP — THE MONTH IS CLOSED** 🏛️`, false, false, true);
     }
 
+    // Top Base Shop of the WEEK — Monday 8:07am, right after the team weekly board.
+    if (day === 1 && hour === 8 && min === 7 && !lastPosted[key('team-baseshop-week')]) {
+      lastPosted[key('team-baseshop-week')] = true;
+      try {
+        const channelId = process.env.TEAM_LEADERBOARD_CHANNEL_ID || process.env.LEADERBOARD_CHANNEL_ID;
+        if (channelId) {
+          const ch = await client.channels.fetch(channelId);
+          const { baseShop } = await computeTeamMVPs('weekly', true, false); // last week
+          if (baseShop) {
+            const shop = baseShop.isMention ? `<@${baseShop.id}>'s Base Shop` : `**${baseShop.name}'s Base Shop**`;
+            await ch.send([
+              ``,
+              `🏆 TOP BASE SHOP OF THE WEEK 🏆`,
+              ``,
+              `One shop out-produced them all last week...`,
+              ``,
+              `🏢 ${shop} — **${formatMoney(baseShop.total)} AP**`,
+              `That's what a team firing on all cylinders looks like. 👑🔥`,
+              ``,
+              `Who's taking the crown next week? 💪`,
+              ``,
+            ].join('\n'));
+          }
+        }
+      } catch (err) { console.error('Team base shop (week) error:', err.message); }
+    }
+
+    // Base Shop of the MONTH — 1st at 8:07am, right after the team monthly recap.
+    if (now.getDate() === 1 && hour === 8 && min === 7 && !lastPosted[key('team-baseshop-month')]) {
+      lastPosted[key('team-baseshop-month')] = true;
+      try {
+        const channelId = process.env.TEAM_LEADERBOARD_CHANNEL_ID || process.env.LEADERBOARD_CHANNEL_ID;
+        if (channelId) {
+          const ch = await client.channels.fetch(channelId);
+          const { baseShop } = await computeTeamMVPs('monthly', false, true); // last month
+          if (baseShop) {
+            const shop = baseShop.isMention ? `<@${baseShop.id}>'s Base Shop` : `**${baseShop.name}'s Base Shop**`;
+            await ch.send([
+              ``,
+              `👑🏆 BASE SHOP OF THE MONTH 🏆👑`,
+              ``,
+              `After a full month of grinding, one shop stood above the rest...`,
+              ``,
+              `🏢 ${shop} — **${formatMoney(baseShop.total)} AP**`,
+              `Total domination. This is what leadership produces. 💎🔥`,
+              ``,
+              `New month, new battle — who's next? 💪`,
+              ``,
+            ].join('\n'));
+          }
+        }
+      } catch (err) { console.error('Team base shop (month) error:', err.message); }
+    }
+
     // ── RECRUITING LEADERBOARDS (leaders channel) ───────────────────────────────
     // Same recap cadence as production, posted to RECRUITING_CHANNEL_ID. Recaps
     // only — no every-2-hours intraday posts.
     // Daily recap — 8am (yesterday's hires), skips Monday
-    if (hour === 8 && min === 0 && day !== 1 && !lastPosted[key('recruit-final-daily')]) {
+    if (hour === 8 && min === 0 && day !== 1 && !weekendBlocked(day, hour) && !lastPosted[key('recruit-final-daily')]) {
       lastPosted[key('recruit-final-daily')] = true;
       postRecruitingLeaderboard('daily', [
         ``,
@@ -1039,7 +1176,7 @@ function scheduleLeaderboards(client) {
     }
 
     // Weekly — 9am, skips Monday
-    if (hour === 9 && min === 0 && day !== 1 && !lastPosted[key('recruit-weekly')]) {
+    if (hour === 9 && min === 0 && day !== 1 && !weekendBlocked(day, hour) && !lastPosted[key('recruit-weekly')]) {
       lastPosted[key('recruit-weekly')] = true;
       postRecruitingLeaderboard('weekly');
     }
@@ -1067,7 +1204,7 @@ function scheduleLeaderboards(client) {
         const channelId = process.env.RECRUITING_CHANNEL_ID;
         if (channelId) {
           const ch = await client.channels.fetch(channelId);
-          const { individual, baseShop } = await computeRecruitingMVPs(true); // true = last week
+          const { individual, baseShop } = await computeRecruitingMVPs('weekly', true, false); // last week
           if (individual) {
             await ch.send([
               ``,
@@ -1111,6 +1248,50 @@ function scheduleLeaderboards(client) {
     if (now.getDate() === 1 && hour === 8 && min === 0 && !lastPosted[key('recruit-final-monthly')]) {
       lastPosted[key('recruit-final-monthly')] = true;
       postRecruitingLeaderboard('monthly', `🌱 **OFG RECRUITING RECAP — THE MONTH IS CLOSED** 🌱`, false, false, true);
+    }
+
+    // Recruiter of the Month + Recruiting Base Shop of the Month — 1st at 8:07am,
+    // leaders channel (mirrors the producer Monthly Champion + team Base Shop of the Month).
+    if (now.getDate() === 1 && hour === 8 && min === 7 && !lastPosted[key('recruit-month-crowns')]) {
+      lastPosted[key('recruit-month-crowns')] = true;
+      try {
+        const channelId = process.env.RECRUITING_CHANNEL_ID;
+        if (channelId) {
+          const ch = await client.channels.fetch(channelId);
+          const { individual, baseShop } = await computeRecruitingMVPs('monthly', false, true); // last month
+          if (individual) {
+            await ch.send([
+              ``,
+              `👑🏆 RECRUITER OF THE MONTH CROWNED! 🏆👑`,
+              ``,
+              `After a full month of building, one recruiter stood above everyone...`,
+              ``,
+              `CONGRATULATIONS to <@${individual.id}>!`,
+              `🌱 ${individual.count} hire${individual.count === 1 ? '' : 's'} this month`,
+              `${individual.rankEmoji} ${individual.rankName}`,
+              ``,
+              `You didn't just recruit — you built the future of OFG. 🏗️🔥`,
+              `Reigning champ until someone takes the crown. 👑`,
+              ``,
+            ].join('\n'));
+          }
+          if (baseShop) {
+            const shop = baseShop.isMention ? `<@${baseShop.id}>'s Base Shop` : `**${baseShop.name}'s Base Shop**`;
+            await ch.send([
+              ``,
+              `👑🏆 RECRUITING BASE SHOP OF THE MONTH 🏆👑`,
+              ``,
+              `After a full month of building, one shop out-recruited them all...`,
+              ``,
+              `🏢 ${shop} — **${baseShop.count} hire${baseShop.count === 1 ? '' : 's'}!**`,
+              `Total domination. That's a team that builds together. 🌱👑`,
+              ``,
+              `New month, new battle — who's next? 🔥`,
+              ``,
+            ].join('\n'));
+          }
+        }
+      } catch (err) { console.error('Recruiting month crowns error:', err.message); }
     }
 
   }, 60 * 1000);

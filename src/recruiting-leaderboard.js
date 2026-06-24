@@ -520,7 +520,45 @@ async function handleHireModal(interaction, client) {
           ].join('\n'));
         }
 
-        // 5) AUTO-GROW GOAL — team total crossed the monthly goal → bump +25.
+        // 5) CAREER HIRE MILESTONES (leaders chat) — lifetime recruit crossings.
+        //    total_count includes this hire, so equality = the moment they cross it.
+        const HIRE_MILESTONES = {
+          25: [
+            `🌱 RECRUITING MILESTONE — 25 CAREER HIRES! 🌱`, ``,
+            `<@${uplineId}> just brought their **25th recruit** into OFG!`,
+            `A foundation is being built — the empire starts here. 🏗️`,
+          ],
+          50: [
+            `🛡️ RECRUITING MILESTONE — 50 CAREER HIRES! 🛡️`, ``,
+            `<@${uplineId}> just signed their **50th career recruit**!`,
+            `Half a hundred builders brought in. That's real leadership. 💪🌱`,
+          ],
+          100: [
+            `💠 RECRUITING MILESTONE — 100 CAREER HIRES! 💠`, ``,
+            `<@${uplineId}> just hit **100 career recruits**!`,
+            `A full century of talent. Empire-architect territory. 🏛️👑`,
+          ],
+          250: [
+            `🏆 RECRUITING MILESTONE — 250 CAREER HIRES! 🏆`, ``,
+            `<@${uplineId}> just crossed **250 career recruits**!`,
+            `A quarter-thousand builders recruited. Absolutely elite. 🌎🔥`,
+          ],
+          500: [
+            `💎 RECRUITING MILESTONE — 500 CAREER HIRES! 💎`, ``,
+            `<@${uplineId}> just reached **500 career recruits**!`,
+            `Five hundred lives changed. That's a dynasty being built. 👑🏗️`,
+          ],
+          1000: [
+            `👑 RECRUITING MILESTONE — 1,000 CAREER HIRES · OFG HALL OF FAME! 👑`, ``,
+            `<@${uplineId}> just signed their **1,000th career recruit**! 🌌`,
+            `One THOUSAND builders brought into OFG — legend status, written into history forever. 🏆🌎🔥`,
+          ],
+        };
+        if (HIRE_MILESTONES[stats.total_count]) {
+          await channel.send(['', ...HIRE_MILESTONES[stats.total_count], ''].join('\n'));
+        }
+
+        // 6) AUTO-GROW GOAL — team total crossed the monthly goal → bump +25.
         const monthlyTeamTotal = await getMonthlyHireTotal();
         let goal = await getHireGoal();
         if (monthlyTeamTotal >= goal) {
@@ -584,18 +622,21 @@ const setHireGoalCommand = {
   },
 };
 
-// ── Weekly recruiting MVPs (individual + base shop) ──────────────────────────────
-// Top recruiter and top base shop by hires for a week. Default = last week, to
-// mirror the producer Weekly MVP that announces the week just finished.
-async function computeRecruitingMVPs(prevWeek = true) {
+// ── Recruiting MVPs (individual + base shop) for a period ────────────────────────
+// period 'weekly' (default) for the Monday MVP; period 'monthly' for the 1st-of-month
+// crowns. Default args reproduce the original weekly behavior.
+async function computeRecruitingMVPs(period = 'weekly', prevWeek = false, prevMonth = false) {
   const tree = await getTeamTree();
-  const rows = await getHireLeaderboard('weekly', prevWeek, false, false);
-  const monthlyMap = await getMonthlyRecruitCountsMap(false);
+  const rows = await getHireLeaderboard(period, prevWeek, false, prevMonth);
+  // Weekly MVP rank reflects the recruiter's CURRENT monthly standing; the monthly
+  // crown ranks off the month's own total (current month is empty on the 1st).
+  const monthlyMap = period === 'monthly' ? null : await getMonthlyRecruitCountsMap(false);
 
   let individual = null;
   if (rows.length) {
     const top = rows[0];
-    const rank = getRecruiterRankForCount(monthlyMap[top.recruiter_id] || 0);
+    const basis = period === 'monthly' ? top.count : (monthlyMap[top.recruiter_id] || 0);
+    const rank = getRecruiterRankForCount(basis);
     individual = { id: top.recruiter_id, count: top.count, rankEmoji: rank.emoji, rankName: rank.name };
   }
 
