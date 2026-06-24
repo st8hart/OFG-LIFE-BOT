@@ -15,11 +15,12 @@
 
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
-const { updateChallengeRecord, formatChallengeMoney } = (() => {
+const { updateChallengeRecord, closeChallengeRow, formatChallengeMoney } = (() => {
   // formatMoney isn't exported from database.js, so define a tiny local copy
   const db = require('./database');
   return {
     updateChallengeRecord: db.updateChallengeRecord,
+    closeChallengeRow: db.closeChallengeRow,
     formatChallengeMoney: (n) => '$' + Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 0 }),
   };
 })();
@@ -118,6 +119,8 @@ async function getUserTotalForDay(userId, dayStart, dayEnd) {
     if (APPLY) {
       await updateChallengeRecord(winner.id, winner.name, true);
       await updateChallengeRecord(loser.id, loser.name, false);
+      // Tag the historical row too, so retroactive streaks + H2H light up.
+      await closeChallengeRow(challenge.id, { tie: false, winner, loser });
       console.log('  -> Recorded.\n');
     } else {
       console.log('  -> (dry run, not written)\n');

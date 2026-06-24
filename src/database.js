@@ -507,6 +507,27 @@ async function expireChallenges() {
   await supabase.from('challenges').update({ status: 'expired' }).eq('status', 'active');
 }
 
+// Tag an individual duel row with its outcome so the Command Center can compute
+// current streaks + head-to-head. This is ADDITIVE — it does not touch the
+// challenge_records aggregate. Decisive duels -> status 'closed' + winner/loser;
+// ties -> status 'tied' with winner/loser left null.
+async function closeChallengeRow(challengeId, { tie, winner, loser }) {
+  const patch = tie
+    ? { status: 'tied', ended_at: new Date().toISOString() }
+    : {
+        status:      'closed',
+        winner_id:   winner.id,
+        winner_name: winner.name,
+        loser_id:    loser.id,
+        loser_name:  loser.name,
+        ended_at:    new Date().toISOString(),
+      };
+  const { error } = await supabase.from('challenges').update(patch).eq('id', challengeId);
+  if (error) {
+    console.error(`[challenges] closeChallengeRow failed for #${challengeId}:`, error.message || error);
+  }
+}
+
 // Call at 11:55pm — grabs daily totals BEFORE midnight reset, stores winner for morning announcement
 async function determineChallengeWinners() {
   const { data, error } = await supabase.from('challenges').select('*').eq('status', 'active');
@@ -540,6 +561,11 @@ async function determineChallengeWinners() {
       await updateChallengeRecord(winner.id, winner.name, true);
       await updateChallengeRecord(loser.id, loser.name, false);
     }
+
+    // Tag the individual duel row so streaks + head-to-head light up automatically.
+    // (Skipped $0/$0 duels above never reach here — they stay 'active' and get
+    //  set to 'expired' at midnight, i.e. correctly streak-less.)
+    await closeChallengeRow(challenge.id, { tie, winner, loser });
   }
 
   if (results.length) {
@@ -1093,6 +1119,7 @@ module.exports = {
   getTeamDailyTotal, getHotWeekBadgesSet, getYesterdayStart,
   getNewProducerSet, getEarlyBirdSet, getHighRollerSet, getReigningChampionId, getShowstopperId, getPersonalBestSale,
   createChallenge, getActiveChallenge, getActiveChallenges, getAllActiveChallenges, expireChallenges,
+  closeChallengeRow,
   getDailyChallengeCount, getDailyChallengeWith, updateChallengeRecord, getChallengeStandings,
   determineChallengeWinners, getPendingChallengeResults, clearPendingChallengeResults,
   getAllAgentFirstSales, getMonthlyChampion, getWeeklyMVP,
