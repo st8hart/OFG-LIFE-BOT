@@ -1256,7 +1256,24 @@ function scheduleLeaderboards(client) {
     // Final monthly — 1st at 8:34am, its own moment after the daily recruiting recap
     if (now.getDate() === 1 && hour === 8 && min === 34 && !lastPosted[key('recruit-final-monthly')]) {
       lastPosted[key('recruit-final-monthly')] = true;
-      postRecruitingLeaderboard('monthly', `🌱 **OFG RECRUITING RECAP — THE MONTH IS CLOSED** 🌱`, false, false, true);
+      postRecruitingLeaderboard('monthly', [
+        ``,
+        `🌱🔒👑 THE RECRUITING MONTH IS OFFICIALLY CLOSED! 👑🔒🌱`,
+        ``,
+        `🏗️💪 What an INCREDIBLE run! Month after month, this team keeps proving`,
+        `what's possible when you stay locked in and keep building the future. 🚀`,
+        ``,
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+        ``,
+        `🏆✨ CONGRATULATIONS to everyone on this board — especially our top`,
+        `recruiters who set the standard for what ELITE recruiting looks like at OFG! ✨🏆`,
+        ``,
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+        ``,
+        `🚪➡️🚀 New month. Fresh start. New goals.`,
+        `Let's build it even BIGGER! 📈🔥🌱`,
+        ``,
+      ].join('\n'), false, false, true);
     }
 
     // Recruiter of the Month + Recruiting Base Shop of the Month — 1st at 8:54am,
