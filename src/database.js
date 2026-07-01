@@ -35,6 +35,23 @@ function getWeekStart(prevWeek = false) {
   return new Date(centralFake.getTime() + offsetMs);
 }
 
+// The 1st of the month at midnight CENTRAL TIME (not server-local/UTC time).
+// This is what every monthly rollup/badge/champion query should use as its
+// start boundary — previously several used `new Date(now.getFullYear(),
+// now.getMonth(), 1)`, which builds the boundary from the server's local
+// (UTC on Railway) year/month. Since Central Time is behind UTC, that made
+// the "month" flip over ~5-6 hours early — at 7:00 PM Central on the last
+// day of the month instead of midnight Central on the 1st.
+function getMonthStart(prevMonth = false) {
+  const realNow     = new Date();
+  const centralFake = new Date(realNow.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+  const offsetMs    = realNow - centralFake;
+  centralFake.setDate(1);
+  centralFake.setMonth(centralFake.getMonth() - (prevMonth ? 1 : 0));
+  centralFake.setHours(0, 0, 0, 0);
+  return new Date(centralFake.getTime() + offsetMs);
+}
+
 // ── Sales ─────────────────────────────────────────────────────────────────────
 
 async function addSale({ userId, username, clientName, policyType, premium, carrier, notes }) {
@@ -49,7 +66,6 @@ async function addSale({ userId, username, clientName, policyType, premium, carr
 
 async function getLeaderboard(period, prevWeek = false, prevDay = false, prevMonth = false) {
   let query = supabase.from('sales').select('user_id, username, premium');
-  const now = new Date();
   if (period === 'daily') {
     if (prevDay) {
       // Yesterday's window: yesterday midnight → today midnight
@@ -69,11 +85,11 @@ async function getLeaderboard(period, prevWeek = false, prevDay = false, prevMon
     }
   } else if (period === 'monthly') {
     const start = prevMonth
-      ? new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      : new Date(now.getFullYear(), now.getMonth(), 1);
+      ? getMonthStart(true)
+      : getMonthStart(false);
     query = query.gte('created_at', start.toISOString());
     if (prevMonth) {
-      query = query.lt('created_at', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
+      query = query.lt('created_at', getMonthStart(false).toISOString());
     }
   }
   const { data, error } = await query;
@@ -88,12 +104,11 @@ async function getLeaderboard(period, prevWeek = false, prevDay = false, prevMon
 }
 
 async function getMonthlyTotal(prevMonth = false) {
-  const now = new Date();
   const start = prevMonth
-    ? new Date(now.getFullYear(), now.getMonth() - 1, 1)
-    : new Date(now.getFullYear(), now.getMonth(), 1);
+    ? getMonthStart(true)
+    : getMonthStart(false);
   let q = supabase.from('sales').select('premium').gte('created_at', start.toISOString());
-  if (prevMonth) q = q.lt('created_at', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
+  if (prevMonth) q = q.lt('created_at', getMonthStart(false).toISOString());
   const { data, error } = await q;
   if (error) throw error;
   return data.reduce((sum, s) => sum + parseFloat(s.premium), 0);
@@ -102,14 +117,13 @@ async function getMonthlyTotal(prevMonth = false) {
 // Returns a map of { userId: monthlyTotal } for all agents — used so daily/weekly
 // leaderboards can show the correct monthly-based rank badge for each agent.
 async function getMonthlyTotalsMap(prevMonth = false) {
-  const now = new Date();
   const start = prevMonth
-    ? new Date(now.getFullYear(), now.getMonth() - 1, 1)
-    : new Date(now.getFullYear(), now.getMonth(), 1);
+    ? getMonthStart(true)
+    : getMonthStart(false);
   let q = supabase.from('sales')
     .select('user_id, premium')
     .gte('created_at', start.toISOString());
-  if (prevMonth) q = q.lt('created_at', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
+  if (prevMonth) q = q.lt('created_at', getMonthStart(false).toISOString());
   const { data, error } = await q;
   if (error) return {};
   const map = {};
@@ -120,10 +134,9 @@ async function getMonthlyTotalsMap(prevMonth = false) {
 }
 
 async function getUserStats(userId) {
-  const now = new Date();
   const todayStart = getDayStart();
   const weekStart = getWeekStart();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthStart = getMonthStart(false);
   const { data, error } = await supabase.from('sales').select('premium, created_at').eq('user_id', userId);
   if (error) throw error;
   const daily   = data.filter(s => new Date(s.created_at) >= todayStart);
@@ -167,8 +180,7 @@ async function getUserStats(userId) {
 }
 
 async function getTeamStats() {
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthStart = getMonthStart(false);
   const { data, error } = await supabase.from('sales').select('premium, created_at, user_id');
   if (error) throw error;
   const monthly = data.filter(s => new Date(s.created_at) >= monthStart);
@@ -281,8 +293,7 @@ async function getChallengeStandings() {
 }
 
 async function getMonthlyTopSale() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const start = getMonthStart(false);
   const { data, error } = await supabase.from('sales').select('premium, user_id, username').gte('created_at', start.toISOString()).order('premium', { ascending: false }).limit(1);
   if (error) throw error;
   return data[0] || null;
@@ -417,8 +428,7 @@ async function setAllTimeRecord(type, amount, userId, username) {
 }
 
 async function getMonthlyRecords() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const start = getMonthStart(false);
   const { data, error } = await supabase.from('sales')
     .select('user_id, username, premium, created_at')
     .gte('created_at', start.toISOString());
@@ -642,8 +652,7 @@ async function getAllAgentFirstSales() {
 // ── Monthly champion ──────────────────────────────────────────────────────────
 
 async function getMonthlyChampion() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const start = getMonthStart(false);
   const { data, error } = await supabase.from('sales')
     .select('user_id, username, premium')
     .gte('created_at', start.toISOString());
@@ -679,8 +688,7 @@ async function getWeeklyMVP(prevWeek = false) {
 // Used to show persistent monthly milestone badges on all leaderboards.
 // Badge = highest sales count hit in any single day this month.
 async function getBestDailyBadgesMap() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const start = getMonthStart(false);
   const { data, error } = await supabase.from('sales')
     .select('user_id, created_at')
     .gte('created_at', start.toISOString());
@@ -711,8 +719,7 @@ async function getTeamDailyTotal() {
 // Returns a Set of user IDs who have logged at least one sale every Mon–Fri
 // in the same week at any point this month. Badge persists all month.
 async function getHotWeekBadgesSet() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const start = getMonthStart(false);
   const { data, error } = await supabase.from('sales')
     .select('user_id, created_at')
     .gte('created_at', start.toISOString());
@@ -779,8 +786,7 @@ async function getEarlyBirdSet() {
 
 // 💰 High Roller — logged a single sale over $3,000 this month
 async function getHighRollerSet() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const start = getMonthStart(false);
   const { data, error } = await supabase.from('sales')
     .select('user_id, premium')
     .gte('created_at', start.toISOString());
@@ -794,9 +800,8 @@ async function getHighRollerSet() {
 
 // 🎖️ Reigning Champ — last month's #1 producer, wears badge all current month
 async function getReigningChampionId() {
-  const now = new Date();
-  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const lastMonthEnd   = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastMonthStart = getMonthStart(true);
+  const lastMonthEnd   = getMonthStart(false);
   const { data, error } = await supabase.from('sales')
     .select('user_id, premium')
     .gte('created_at', lastMonthStart.toISOString())
@@ -822,8 +827,7 @@ async function getPersonalBestSale(userId) {
 
 // 🏋️ Showstopper — holds the biggest single sale of the month
 async function getShowstopperId() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const start = getMonthStart(false);
   const { data, error } = await supabase.from('sales')
     .select('user_id, premium')
     .gte('created_at', start.toISOString())
@@ -934,7 +938,6 @@ async function addHire({ recruitName, state, licensed, source, recruiterId, recr
 // Per-recruiter hire counts for a period (mirrors getLeaderboard).
 async function getHireLeaderboard(period, prevWeek = false, prevDay = false, prevMonth = false) {
   let query = supabase.from('hires').select('recruiter_id, recruiter_name, created_at');
-  const now = new Date();
   if (period === 'daily') {
     if (prevDay) {
       query = query
@@ -948,10 +951,10 @@ async function getHireLeaderboard(period, prevWeek = false, prevDay = false, pre
     if (prevWeek) query = query.lt('created_at', getWeekStart(false).toISOString());
   } else if (period === 'monthly') {
     const start = prevMonth
-      ? new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      : new Date(now.getFullYear(), now.getMonth(), 1);
+      ? getMonthStart(true)
+      : getMonthStart(false);
     query = query.gte('created_at', start.toISOString());
-    if (prevMonth) query = query.lt('created_at', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
+    if (prevMonth) query = query.lt('created_at', getMonthStart(false).toISOString());
   }
   const { data, error } = await query;
   if (error) throw error;
@@ -967,7 +970,6 @@ async function getHireLeaderboard(period, prevWeek = false, prevDay = false, pre
 // Per-source hire counts for a period (for the "Hires by Source" board line).
 async function getHireSourceCounts(period, prevWeek = false, prevDay = false, prevMonth = false) {
   let query = supabase.from('hires').select('source, created_at');
-  const now = new Date();
   if (period === 'daily') {
     if (prevDay) {
       query = query
@@ -981,10 +983,10 @@ async function getHireSourceCounts(period, prevWeek = false, prevDay = false, pr
     if (prevWeek) query = query.lt('created_at', getWeekStart(false).toISOString());
   } else if (period === 'monthly') {
     const start = prevMonth
-      ? new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      : new Date(now.getFullYear(), now.getMonth(), 1);
+      ? getMonthStart(true)
+      : getMonthStart(false);
     query = query.gte('created_at', start.toISOString());
-    if (prevMonth) query = query.lt('created_at', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
+    if (prevMonth) query = query.lt('created_at', getMonthStart(false).toISOString());
   }
   const { data, error } = await query;
   if (error) throw error;
@@ -998,12 +1000,11 @@ async function getHireSourceCounts(period, prevWeek = false, prevDay = false, pr
 
 // Team-wide hires this month (for the goal/progress bar).
 async function getMonthlyHireTotal(prevMonth = false) {
-  const now = new Date();
   const start = prevMonth
-    ? new Date(now.getFullYear(), now.getMonth() - 1, 1)
-    : new Date(now.getFullYear(), now.getMonth(), 1);
+    ? getMonthStart(true)
+    : getMonthStart(false);
   let q = supabase.from('hires').select('id').gte('created_at', start.toISOString());
-  if (prevMonth) q = q.lt('created_at', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
+  if (prevMonth) q = q.lt('created_at', getMonthStart(false).toISOString());
   const { data, error } = await q;
   if (error) throw error;
   return data.length;
@@ -1011,10 +1012,9 @@ async function getMonthlyHireTotal(prevMonth = false) {
 
 // One recruiter's daily / weekly / monthly / all-time hire counts (for the card).
 async function getUserHireStats(recruiterId) {
-  const now = new Date();
   const todayStart = getDayStart();
   const weekStart  = getWeekStart();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthStart = getMonthStart(false);
   const { data, error } = await supabase.from('hires').select('created_at').eq('recruiter_id', recruiterId);
   if (error) throw error;
   const daily   = data.filter(h => new Date(h.created_at) >= todayStart);
@@ -1079,12 +1079,11 @@ function getRecruiterRankForCount(count) {
 
 // { recruiterId: monthly hire count } — drives rank badges + team-badge rollups.
 async function getMonthlyRecruitCountsMap(prevMonth = false) {
-  const now = new Date();
   const start = prevMonth
-    ? new Date(now.getFullYear(), now.getMonth() - 1, 1)
-    : new Date(now.getFullYear(), now.getMonth(), 1);
+    ? getMonthStart(true)
+    : getMonthStart(false);
   let q = supabase.from('hires').select('recruiter_id, created_at').gte('created_at', start.toISOString());
-  if (prevMonth) q = q.lt('created_at', new Date(now.getFullYear(), now.getMonth(), 1).toISOString());
+  if (prevMonth) q = q.lt('created_at', getMonthStart(false).toISOString());
   const { data, error } = await q;
   if (error) return {};
   const m = {};
@@ -1094,9 +1093,8 @@ async function getMonthlyRecruitCountsMap(prevMonth = false) {
 
 // 🎖️ Reigning Recruiter — last month's #1 recruiter, wears the badge all month.
 async function getReigningRecruiterId() {
-  const now = new Date();
-  const lmStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const lmEnd   = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lmStart = getMonthStart(true);
+  const lmEnd   = getMonthStart(false);
   const { data, error } = await supabase.from('hires').select('recruiter_id')
     .gte('created_at', lmStart.toISOString()).lt('created_at', lmEnd.toISOString());
   if (error || !data.length) return null;
@@ -1107,8 +1105,7 @@ async function getReigningRecruiterId() {
 
 // { recruiterId: best single-day hire count this month } — for the best-day badge.
 async function getBestRecruitingDayMap() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const start = getMonthStart(false);
   const { data, error } = await supabase.from('hires').select('recruiter_id, created_at').gte('created_at', start.toISOString());
   if (error) return {};
   const perDay = {};

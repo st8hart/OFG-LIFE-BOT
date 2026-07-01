@@ -777,8 +777,8 @@ function scheduleLeaderboards(client) {
       } catch (err) { console.error('MVP error:', err.message); }
     }
 
-    // Monthly champion on 1st at 8:05am
-    if (now.getDate() === 1 && hour === 8 && min === 5 && !lastPosted[key('champion')]) {
+    // Monthly champion — 1st at 8:40am (20 min after the month-closed post)
+    if (now.getDate() === 1 && hour === 8 && min === 40 && !lastPosted[key('champion')]) {
       lastPosted[key('champion')] = true;
       try {
         const champion = await getMonthlyChampion();
@@ -977,8 +977,10 @@ function scheduleLeaderboards(client) {
       ].join('\n'), true);
     }
 
-    // New month personal goal reminder - 1st of month at 7am
-    if (now.getDate() === 1 && hour === 7 && min === 0 && !lastPosted[key('new-month-goals')]) {
+    // New month personal goal reminder - 1st of month at 12:05pm (midday, its own moment
+    // instead of stacking on top of the early-morning wake-up posts). Offset 5 min past
+    // noon so it never collides with the Friday-only H2H Standings post at 12:00.
+    if (now.getDate() === 1 && hour === 12 && min === 5 && !lastPosted[key('new-month-goals')]) {
       lastPosted[key('new-month-goals')] = true;
       try {
         const salesChannelId = process.env.SALES_CHANNEL_ID;
@@ -1049,19 +1051,26 @@ function scheduleLeaderboards(client) {
       } catch (err) { console.error('Mid-month goal reminder error:', err.message); }
     }
 
-    // Final Monthly on 1st at 8am
-    if (now.getDate() === 1 && hour === 8 && min === 0 && !lastPosted[key('final-monthly')]) {
+    // Final Monthly — 1st at 8:20am (20 min after the daily recap, so it lands as
+    // its own moment instead of stacking right on top of "yesterday's results")
+    if (now.getDate() === 1 && hour === 8 && min === 20 && !lastPosted[key('final-monthly')]) {
       lastPosted[key('final-monthly')] = true;
       postFinalLeaderboard('monthly', [
         ``,
-        `THE MONTH IS OFFICIALLY CLOSED!`,
-        `What an incredible run. Month after month this team continues to prove`,
-        `whats possible when you stay locked in and trust the process.`,
+        `🎉🔒👑 THE MONTH IS OFFICIALLY CLOSED! 👑🔒🎉`,
         ``,
-        `Congratulations to everyone on this leaderboard - especially our top producers`,
-        `who set the standard for what ELITE performance looks like at OFG!`,
+        `🔥💪 What an INCREDIBLE run! Month after month, this team keeps proving`,
+        `what's possible when you stay locked in and trust the process. 🚀`,
         ``,
-        `New month. Fresh start. New goals. Lets make it even bigger!`,
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+        ``,
+        `🏆✨ CONGRATULATIONS to everyone on this leaderboard — especially our`,
+        `top producers who set the standard for what ELITE performance looks like at OFG! ✨🏆`,
+        ``,
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+        ``,
+        `🚪➡️🚀 New month. Fresh start. New goals.`,
+        `Let's make it even BIGGER! 📈🔥👑`,
         ``,
       ].join('\n'));
     }
@@ -1097,8 +1106,8 @@ function scheduleLeaderboards(client) {
       postTeamLeaderboard('monthly');
     }
 
-    // Team final monthly — 1st at 8:02am, 2 min after producer final monthly
-    if (now.getDate() === 1 && hour === 8 && min === 2 && !lastPosted[key('team-final-monthly')]) {
+    // Team final monthly — 1st at 8:28am, after the daily team recap has had room to breathe
+    if (now.getDate() === 1 && hour === 8 && min === 28 && !lastPosted[key('team-final-monthly')]) {
       lastPosted[key('team-final-monthly')] = true;
       postTeamLeaderboard('monthly', `🏛️ **OFG TEAM RECAP — THE MONTH IS CLOSED** 🏛️`, false, false, true);
     }
@@ -1130,8 +1139,8 @@ function scheduleLeaderboards(client) {
       } catch (err) { console.error('Team base shop (week) error:', err.message); }
     }
 
-    // Base Shop of the MONTH — 1st at 8:07am, right after the team monthly recap.
-    if (now.getDate() === 1 && hour === 8 && min === 7 && !lastPosted[key('team-baseshop-month')]) {
+    // Base Shop of the MONTH — 1st at 8:48am, its own moment after the team monthly recap.
+    if (now.getDate() === 1 && hour === 8 && min === 48 && !lastPosted[key('team-baseshop-month')]) {
       lastPosted[key('team-baseshop-month')] = true;
       try {
         const channelId = process.env.TEAM_LEADERBOARD_CHANNEL_ID || process.env.LEADERBOARD_CHANNEL_ID;
@@ -1244,15 +1253,15 @@ function scheduleLeaderboards(client) {
       postRecruitingLeaderboard('monthly');
     }
 
-    // Final monthly — 1st at 8am
-    if (now.getDate() === 1 && hour === 8 && min === 0 && !lastPosted[key('recruit-final-monthly')]) {
+    // Final monthly — 1st at 8:34am, its own moment after the daily recruiting recap
+    if (now.getDate() === 1 && hour === 8 && min === 34 && !lastPosted[key('recruit-final-monthly')]) {
       lastPosted[key('recruit-final-monthly')] = true;
       postRecruitingLeaderboard('monthly', `🌱 **OFG RECRUITING RECAP — THE MONTH IS CLOSED** 🌱`, false, false, true);
     }
 
-    // Recruiter of the Month + Recruiting Base Shop of the Month — 1st at 8:07am,
+    // Recruiter of the Month + Recruiting Base Shop of the Month — 1st at 8:54am,
     // leaders channel (mirrors the producer Monthly Champion + team Base Shop of the Month).
-    if (now.getDate() === 1 && hour === 8 && min === 7 && !lastPosted[key('recruit-month-crowns')]) {
+    if (now.getDate() === 1 && hour === 8 && min === 54 && !lastPosted[key('recruit-month-crowns')]) {
       lastPosted[key('recruit-month-crowns')] = true;
       try {
         const channelId = process.env.RECRUITING_CHANNEL_ID;
