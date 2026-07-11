@@ -117,7 +117,9 @@ const leaderboardCommand = {
         { name: 'Last Month', value: 'lastmonth' },
       )),
   async execute(interaction) {
-    await interaction.deferReply();
+    // Ephemeral: the leaderboard is sent privately, visible only to the person
+    // who ran /leaderboard, so a self-lookup doesn't blow up the channel.
+    await interaction.deferReply({ ephemeral: true });
     const period = interaction.options.getString('period') || 'monthly';
     if (period === 'yesterday') {
       return interaction.editReply({ embeds: [await buildLeaderboardEmbed('daily', false, true)] });
@@ -187,7 +189,7 @@ const teamStatsCommand = {
       timestamp: new Date().toISOString(),
       footer: { text: 'OFG - Production Tracker' },
     };
-    await interaction.reply({ embeds: [embed] });
+    await interaction.reply({ embeds: [embed], ephemeral: true });
   },
 };
 
@@ -210,9 +212,11 @@ const recentSalesCommand = {
       else current += line + '\n';
     }
     if (current) chunks.push(current);
-    await interaction.reply({ embeds: [{ color: 0x3498DB, title: `Recent Sales (Last ${sales.length})`, description: chunks[0], footer: { text: 'OFG - Production Tracker' } }] });
+    // Ephemeral: recent sales are shown privately to whoever ran the command,
+    // so looking it up for yourself doesn't spam the channel.
+    await interaction.reply({ embeds: [{ color: 0x3498DB, title: `Recent Sales (Last ${sales.length})`, description: chunks[0], footer: { text: 'OFG - Production Tracker' } }], ephemeral: true });
     for (let i = 1; i < chunks.length; i++) {
-      await interaction.followUp({ embeds: [{ color: 0x3498DB, description: chunks[i] }] });
+      await interaction.followUp({ embeds: [{ color: 0x3498DB, description: chunks[i] }], ephemeral: true });
     }
   },
 };
@@ -380,7 +384,7 @@ const standingsCommand = {
     .setName('standings')
     .setDescription('View the OFG all-time head to head challenge standings'),
   async execute(interaction) {
-    await interaction.deferReply();
+    await interaction.deferReply({ ephemeral: true });
     const records = await getChallengeStandings();
     await interaction.editReply({ embeds: [buildStandingsEmbed(records)] });
   },
@@ -434,7 +438,7 @@ const teamGoalsCommand = {
     .setName('teamgoals')
     .setDescription('See everyone on the team and their personal monthly goals'),
   async execute(interaction) {
-    await interaction.deferReply();
+    await interaction.deferReply({ ephemeral: true });
 
     const goals = await getAllPersonalGoals();
 

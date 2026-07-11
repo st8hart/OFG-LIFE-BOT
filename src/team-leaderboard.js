@@ -193,7 +193,7 @@ const teamLeaderboardCommand = {
         { name: 'Last Month', value: 'lastmonth' },
       )),
   async execute(interaction) {
-    await interaction.deferReply();
+    await interaction.deferReply({ ephemeral: true });
     const period = interaction.options.getString('period') || 'monthly';
     if (period === 'yesterday') return interaction.editReply({ embeds: [await buildTeamLeaderboardEmbed('daily', false, true)] });
     if (period === 'lastweek')  return interaction.editReply({ embeds: [await buildTeamLeaderboardEmbed('weekly', true, false)] });

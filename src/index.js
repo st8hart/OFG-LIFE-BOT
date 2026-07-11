@@ -105,6 +105,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
+// ── Monthly "biggest of the month" announcement floors ────────────────────────
+// The biggest-sale / biggest-day / biggest-week-of-the-month records are always
+// tracked accurately underneath (they're computed live from the sales data).
+// These floors ONLY gate the celebratory CALL-OUT, so the start of a fresh month
+// doesn't blast "🏅 biggest day of the month!" for tiny early numbers when the
+// bar is basically zero. A shout-out fires only once the number BOTH beats the
+// prior monthly best AND clears the floor below — so it goes quiet early, kicks
+// in mid-month as real production stacks up, and keeps marking new highs from
+// there. Edit these to taste; they're the only line you touch.
+const MONTHLY_RECORD_FLOORS = {
+  sale: 3500,   // biggest single sale of the month
+  day:  5000,   // biggest sales day of the month
+  week: 15000,  // biggest sales week of the month
+};
+
 // ── Daily sale milestone system ───────────────────────────────────────────────
 // line: shown inside the sale alert embed for all milestones (2+)
 // shoutout: separate channel message fired at 3+ only
@@ -394,8 +409,8 @@ async function handleSaleModal(interaction) {
         ].join('\n'));
       }
 
-      // Biggest single sale of the month
-      if (!prevTopSale || premium > parseFloat(prevTopSale.premium)) {
+      // Biggest single sale of the month (only shout it out once it clears the floor)
+      if ((!prevTopSale || premium > parseFloat(prevTopSale.premium)) && premium >= MONTHLY_RECORD_FLOORS.sale) {
         await channel.send([
           ``,
           `💥 BIGGEST MONTHLY SALE! 💥`,
@@ -409,7 +424,7 @@ async function handleSaleModal(interaction) {
       // Check daily total record for this month
       const myDailyTotal = await getUserDailyTotal(interaction.user.id);
       const { bestDay: monthBestDay, bestWeek: monthBestWeek } = await getMonthlyRecords();
-      if (!monthBestDay || myDailyTotal > monthBestDay.total) {
+      if ((!monthBestDay || myDailyTotal > monthBestDay.total) && myDailyTotal >= MONTHLY_RECORD_FLOORS.day) {
         await channel.send([
           ``,
           `🏅 BIGGEST SALES DAY THIS MONTH! 🏅`,
@@ -422,7 +437,7 @@ async function handleSaleModal(interaction) {
 
       // Check weekly total record for this month
       const myWeeklyTotal = await getUserWeeklyTotal(interaction.user.id);
-      if (!monthBestWeek || myWeeklyTotal > monthBestWeek.total) {
+      if ((!monthBestWeek || myWeeklyTotal > monthBestWeek.total) && myWeeklyTotal >= MONTHLY_RECORD_FLOORS.week) {
         await channel.send([
           ``,
           `🏅 BIGGEST SALES WEEK THIS MONTH! 🏅`,
@@ -733,15 +748,10 @@ function scheduleLeaderboards(client) {
   // Monthly recaps and Monday / 1st-of-month milestones are exempt (handled below).
   const weekendBlocked = (day, hour) => day === 0 || (day === 6 && hour > 18);
 
-  // Daily every 2hrs 12pm-midnight Central.
-  setInterval(() => {
-    const centralNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }));
-    const hour = centralNow.getHours();
-    const day  = centralNow.getDay();
-    if (hour < 12 || hour >= 24) return;
-    if (weekendBlocked(day, hour)) return;
-    postLeaderboard('daily');
-  }, 2 * 60 * 60 * 1000);
+  // Intraday daily boards are posted as INDIVIDUAL + TEAM pairs at 12/3/6/9pm
+  // Central — see the paired block in the minute-checker below. (The old every-2-
+  // hours individual-only timer was removed so the two boards always travel
+  // together and there are fewer messages through the day.)
 
   // Minute checker for exact times
   let lastPosted = {};
@@ -1076,10 +1086,15 @@ function scheduleLeaderboards(client) {
     }
 
     // ── TEAM / LEADERSHIP LEADERBOARDS ──────────────────────────────────────────
-    // Intraday team board — 1pm / 5pm / 9pm Central (in the gaps the producer board leaves)
-    if ([13, 17, 21].includes(hour) && min === 0 && !weekendBlocked(day, hour) && !lastPosted[key('team-daily')]) {
-      lastPosted[key('team-daily')] = true;
-      postTeamLeaderboard('daily');
+    // Intraday daily PAIR — individual board immediately followed by the team board,
+    // at 12pm / 3pm / 6pm / 10pm Central. One clean "here's today so far" moment each
+    // time instead of the two boards scattered separately through the afternoon.
+    // (Weekend rule still applies: none on Sunday; on Saturday the 10pm pair is
+    // blocked since posts stop after 6pm.)
+    if ([12, 15, 18, 22].includes(hour) && min === 0 && !weekendBlocked(day, hour) && !lastPosted[key('daily-pair')]) {
+      lastPosted[key('daily-pair')] = true;
+      await postLeaderboard('daily');      // individual first
+      await postTeamLeaderboard('daily');  // team right after, back to back
     }
 
     // Team daily recap — 8:02am, 2 min after producer final daily (skips Monday, like producer)
@@ -1094,8 +1109,10 @@ function scheduleLeaderboards(client) {
       postTeamLeaderboard('weekly');
     }
 
-    // Team final weekly — Monday 8:02am, 2 min after producer final weekly
-    if (day === 1 && hour === 8 && min === 2 && !lastPosted[key('team-final-weekly')]) {
+    // Team final weekly — Monday 8:07am, #3 in the weekly recap sequence.
+    // Order in the leaderboard channel: individual weekly board (8:00) → Weekly MVP
+    // (8:05) → this team board (8:07) → Base Shop of the Week (8:09, the finale).
+    if (day === 1 && hour === 8 && min === 7 && !lastPosted[key('team-final-weekly')]) {
       lastPosted[key('team-final-weekly')] = true;
       postTeamLeaderboard('weekly', `🏪 **OFG TEAM RECAP — LAST WEEK LOCKED IN** 🏪`, true, false, true);
     }
@@ -1106,14 +1123,16 @@ function scheduleLeaderboards(client) {
       postTeamLeaderboard('monthly');
     }
 
-    // Team final monthly — 1st at 8:28am, after the daily team recap has had room to breathe
-    if (now.getDate() === 1 && hour === 8 && min === 28 && !lastPosted[key('team-final-monthly')]) {
+    // Team final monthly — 1st at 8:44am, #3 in the monthly recap sequence.
+    // Order in the leaderboard channel: individual monthly board (8:20) → Monthly
+    // Champion (8:40) → this team board (8:44) → Base Shop of the Month (8:48, finale).
+    if (now.getDate() === 1 && hour === 8 && min === 44 && !lastPosted[key('team-final-monthly')]) {
       lastPosted[key('team-final-monthly')] = true;
       postTeamLeaderboard('monthly', `🏛️ **OFG TEAM RECAP — THE MONTH IS CLOSED** 🏛️`, false, false, true);
     }
 
-    // Top Base Shop of the WEEK — Monday 8:07am, right after the team weekly board.
-    if (day === 1 && hour === 8 && min === 7 && !lastPosted[key('team-baseshop-week')]) {
+    // Top Base Shop of the WEEK — Monday 8:09am, the finale after the team weekly board.
+    if (day === 1 && hour === 8 && min === 9 && !lastPosted[key('team-baseshop-week')]) {
       lastPosted[key('team-baseshop-week')] = true;
       try {
         const channelId = process.env.TEAM_LEADERBOARD_CHANNEL_ID || process.env.LEADERBOARD_CHANNEL_ID;
@@ -1139,7 +1158,7 @@ function scheduleLeaderboards(client) {
       } catch (err) { console.error('Team base shop (week) error:', err.message); }
     }
 
-    // Base Shop of the MONTH — 1st at 8:48am, its own moment after the team monthly recap.
+    // Base Shop of the MONTH — 1st at 8:48am, the finale right after the team monthly board.
     if (now.getDate() === 1 && hour === 8 && min === 48 && !lastPosted[key('team-baseshop-month')]) {
       lastPosted[key('team-baseshop-month')] = true;
       try {
