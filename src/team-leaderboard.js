@@ -269,17 +269,31 @@ const teamSetupCommand = {
     if (!isAdmin(interaction)) return interaction.reply({ content: 'You need Admin permissions to use this.', ephemeral: true });
     await interaction.deferReply({ ephemeral: true });
     const tree = await getTeamTree();
-    const text = renderTreeText(tree);
+
+    // renderTreeText wraps the tree in ``` fences — strip them, we re-add per page.
+    const raw = renderTreeText(tree).replace(/^```\n/, '').replace(/\n```$/, '');
     const masters = tree.masterLeaders().map(id => tree.getPerson(id).name).join(', ') || '—';
-    const shops = tree.baseShopLeaders().map(id => tree.getPerson(id).name).join(', ') || '—';
-    const body = [
-      '**OFG TEAM STRUCTURE (live)**',
-      text,
-      `🏛️ **Master Agency board:** ${masters}`,
-      `🏪 **Base Shop board:** ${shops}`,
-    ].join('\n');
-    // Discord message cap is 2000 chars — trim if the tree is huge.
-    await interaction.editReply({ content: body.length > 1990 ? body.slice(0, 1980) + '\n…(truncated)' : body });
+    const shops   = tree.baseShopLeaders().map(id => tree.getPerson(id).name).join(', ') || '—';
+
+    // Discord caps a message at 2000 chars. The old code just chopped the tree
+    // off at 1990. Instead, split into whole-line pages and send as many as needed.
+    const pages = [];
+    let cur = '';
+    for (const line of raw.split('\n')) {
+      if ((cur + line + '\n').length > 1850 && cur) { pages.push(cur); cur = ''; }
+      cur += line + '\n';
+    }
+    if (cur.trim()) pages.push(cur);
+    if (!pages.length) pages.push('(empty)');
+
+    await interaction.editReply({ content: '**OFG TEAM STRUCTURE (live)**\n```\n' + pages[0] + '```' });
+    for (let i = 1; i < pages.length; i++) {
+      await interaction.followUp({ content: '```\n' + pages[i] + '```', ephemeral: true });
+    }
+    await interaction.followUp({
+      content: `🏛️ **Master Agency board:** ${masters}\n🏪 **Base Shop board:** ${shops}`,
+      ephemeral: true,
+    });
   },
 };
 
