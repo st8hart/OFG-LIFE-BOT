@@ -78,27 +78,53 @@ async function syncAllMembers({ rest, guildId, dryRun = false, onProgress = null
   // name like the six "Rob Super"s, or no clear hire) stays FLAT — no upline —
   // for a human to confirm. A wrong upline poisons the tree worse than a blank.
   const hires = await getAllHiresForUpline();
-  const recruitersByName = new Map(); // normName -> Set(recruiter_id)
+  // Server nicknames embed the upline + state ("Edgar Navarrete-Crisp-ID") while
+  // hire records carry the clean name — so index BOTH keys: the full normalized
+  // name and the first two tokens (first + last). Either way it's unique-or-
+  // nothing on both sides; duplicate first+last names stay unplaced.
+  const first2 = (nn) => {
+    const parts = String(nn || '').split(' ').filter(Boolean);
+    return parts.length >= 2 ? parts.slice(0, 2).join(' ') : null;
+  };
+  const addKey = (map, key, val) => {
+    if (!key) return;
+    if (!map.has(key)) map.set(key, new Set());
+    map.get(key).add(val);
+  };
+  const recruitersByName = new Map();   // full normName -> Set(recruiter_id)
+  const recruitersByFirst2 = new Map(); // first+last    -> Set(recruiter_id)
   for (const h of hires) {
     const nn = normName(h.recruit_name);
     if (!nn || !h.recruiter_id) continue;
-    if (!recruitersByName.has(nn)) recruitersByName.set(nn, new Set());
-    recruitersByName.get(nn).add(h.recruiter_id);
+    addKey(recruitersByName, nn, h.recruiter_id);
+    addKey(recruitersByFirst2, first2(nn), h.recruiter_id);
   }
-  const memberNameCount = new Map(); // normName -> how many members carry it
+  const memberNameCount = new Map();   // full normName -> member count
+  const memberFirst2Count = new Map(); // first+last    -> member count
   for (const m of members) {
     const nn = normName(m.name);
-    if (nn) memberNameCount.set(nn, (memberNameCount.get(nn) || 0) + 1);
+    if (!nn) continue;
+    memberNameCount.set(nn, (memberNameCount.get(nn) || 0) + 1);
+    const f2 = first2(nn);
+    if (f2) memberFirst2Count.set(f2, (memberFirst2Count.get(f2) || 0) + 1);
   }
   const confidentUpline = (name) => {
     const nn = normName(name);
     if (!nn) return null;
-    if ((memberNameCount.get(nn) || 0) !== 1) return null;   // duplicate member name → unsure
-    const recs = recruitersByName.get(nn);
-    if (!recs || recs.size !== 1) return null;               // zero or many recruiters → unsure
-    const recruiterId = [...recs][0];
-    if (!teamMemberIds.has(recruiterId)) return null;        // recruiter isn't a real node → unsure
-    return recruiterId;
+    // Full-name key first, then the first+last fallback — each requires a
+    // UNIQUE member name AND a UNIQUE recruiter, or we don't guess.
+    for (const [key, nameCount, recMap] of [
+      [nn, memberNameCount.get(nn) || 0, recruitersByName],
+      [first2(nn), memberFirst2Count.get(first2(nn)) || 0, recruitersByFirst2]
+    ]) {
+      if (!key || nameCount !== 1) continue;
+      const recs = recMap.get(key);
+      if (!recs || recs.size !== 1) continue;
+      const recruiterId = [...recs][0];
+      if (!teamMemberIds.has(recruiterId)) continue;         // recruiter isn't a real node
+      return recruiterId;
+    }
+    return null;
   };
 
   if (dryRun) {
