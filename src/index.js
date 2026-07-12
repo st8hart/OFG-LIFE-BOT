@@ -29,6 +29,7 @@ const {
   clearPendingChallengesCommand,
 } = require('./commands');
 const { buildTeamLeaderboardEmbed, computeTeamMVPs, teamLeaderboardCommand, teamAssignCommand, teamRemoveCommand, teamSetupCommand } = require('./team-leaderboard');
+const { syncAllMembers } = require('./member-sync');
 const {
   buildRecruitingLeaderboardEmbed, computeRecruitingMVPs,
   addHireCommand, recruitingLeaderboardCommand, setHireGoalCommand,
@@ -82,6 +83,18 @@ client.once(Events.ClientReady, async (c) => {
     console.error('Command auto-registration failed:', err.message);
   }
   scheduleLeaderboards(client);
+
+  // One immediate member sync on startup (then automatically every day at
+  // 3:07am) so a fresh deploy pulls everyone into team_members right away — the
+  // OFG Hub can then match/link anyone. No terminal, no laptop. Fire-and-forget
+  // so it never delays the bot coming online.
+  (async () => {
+    try {
+      const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+      const r = await syncAllMembers({ rest, guildId: process.env.GUILD_ID });
+      console.log(`[member-sync] startup: scanned ${r.scanned}, added ${r.added} new member(s) to team_members`);
+    } catch (err) { console.error('Member sync (startup) error:', err.message); }
+  })();
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -820,6 +833,21 @@ function scheduleLeaderboards(client) {
       firedMomentumThresholds.clear();
       firedRecordWatch = false;
       try { await expireChallenges(); } catch (err) { console.error('Challenge reset error:', err.message); }
+    }
+
+    // ── Daily MEMBER SYNC — 3:07am Central ──────────────────────────────────
+    // Make sure EVERYONE in the Discord is in team_members so the OFG Hub can
+    // match/link anyone (not just people who've produced). Only ADDS newcomers;
+    // never touches placed leaders; never deletes. Runs on the server, so it's
+    // fully automatic — no terminal, no laptop. Idempotent, so a restart that
+    // re-runs it is harmless.
+    if (hour === 3 && min === 7 && !lastPosted[key('member-sync')]) {
+      lastPosted[key('member-sync')] = true;
+      try {
+        const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+        const r = await syncAllMembers({ rest, guildId: process.env.GUILD_ID });
+        console.log(`[member-sync] scanned ${r.scanned}, added ${r.added} new member(s) to team_members`);
+      } catch (err) { console.error('Member sync error:', err.message); }
     }
 
     // Determine challenge winners at 11:55pm BEFORE daily totals reset at midnight
