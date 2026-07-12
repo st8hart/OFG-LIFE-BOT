@@ -42,12 +42,14 @@ const DRY = process.argv.includes('--dry');
     console.log(`Already in team_members:       ${r.alreadyIn}  (left untouched)`);
 
     if (DRY) {
-      console.log(`New members that WOULD be added: ${r.newcomers.length}`);
+      console.log(`New members that WOULD be added:   ${r.newcomers.length}`);
+      console.log(`   …auto-placed under a recruiter: ${r.placedUnderRecruiter}  (the rest come in flat)`);
       r.newcomers.slice(0, 15).forEach((m) => console.log(`   • ${m.name}  (${m.id})`));
       if (r.newcomers.length > 15) console.log(`   … and ${r.newcomers.length - 15} more.`);
       console.log('\nDRY RUN — nothing written. Re-run without --dry to add them.');
     } else {
       console.log(`Added:                         ${r.added}`);
+      console.log(`   …auto-placed under recruiter: ${r.placedUnderRecruiter}  (the rest come in flat)`);
       console.log('\nDone. Now open the OFG Hub → Roster → "Sync Identities" to auto-link everyone.');
     }
   } catch (err) {

@@ -1163,7 +1163,17 @@ async function setAllTimeHireRecord(type, count, userId, username) {
   if (error) console.error(`[hires] setAllTimeHireRecord(${type}) failed:`, error.message || error);
 }
 
+// Every hire's recruit name + who recruited them (recruiter_id = a team_members
+// user_id). Feeds the member sweep's "auto-place a new person under whoever
+// recruited them" logic. Small select, whole table — hires is low-volume.
+async function getAllHiresForUpline() {
+  const { data, error } = await supabase.from('hires').select('recruit_name, recruiter_id');
+  if (error) { console.error('[hires] getAllHiresForUpline failed:', error.message || error); return []; }
+  return data || [];
+}
+
 module.exports = {
+  getAllHiresForUpline,
   addHire, getHireLeaderboard, getHireSourceCounts, getMonthlyHireTotal, getUserHireStats, getHireGoal, setHireGoal,
   getRecruiterRanks, getRecruiterRankForCount, getMonthlyRecruitCountsMap, getReigningRecruiterId, getBestRecruitingDayMap, getRecruiterDailyCount,
   getTeamDailyHireCount, getAllTimeHireRecords, setAllTimeHireRecord,

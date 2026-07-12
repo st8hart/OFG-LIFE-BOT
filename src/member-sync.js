@@ -19,7 +19,24 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const { Routes } = require('discord.js');
-const { getTeamMembersRaw, upsertTeamMember } = require('./database');
+const { getTeamMembersRaw, upsertTeamMember, getAllHiresForUpline } = require('./database');
+
+// Normalize a name for matching: drop a trailing state/location tag ("Rob - FL",
+// "Tara (Texas)"), diacritics, and punctuation. Mirrors the hub's matcher so the
+// two systems agree on who's who.
+function normName(raw) {
+  let n = String(raw || '').trim();
+  if (!n) return '';
+  const tagged = n.replace(/[\s]*[-–—][\s]*[A-Za-z]{2}$|[\s]*\([A-Za-z ]{2,}\)$/g, '');
+  if (tagged.trim().split(/\s+/).length >= 2) n = tagged;
+  return n
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 // Every human member, paginated (1000 at a time).
 async function fetchAllMembers(rest, guildId) {
@@ -44,33 +61,81 @@ async function fetchAllMembers(rest, guildId) {
   return out;
 }
 
-// Add any server member who isn't in team_members yet. Returns a small report.
+// Add any server member who isn't in team_members yet, and — when we're CERTAIN
+// who they are — place them under whoever recruited them. Returns a small report.
 // dryRun: fetch + compare only, write nothing (report.newcomers is populated).
 async function syncAllMembers({ rest, guildId, dryRun = false, onProgress = null }) {
   const members = await fetchAllMembers(rest, guildId);
   const existing = await getTeamMembersRaw();
   const existingIds = new Set(existing.map((r) => r.user_id));
+  const teamMemberIds = new Set(existing.map((r) => r.user_id)); // a recruiter must be a real node
   const newcomers = members.filter((m) => !existingIds.has(m.id));
 
+  // ── Confident upline from recruiting ──────────────────────────────────────
+  // Auto-place a newcomer under their recruiter ONLY when it's unambiguous on
+  // BOTH sides: their name maps to exactly one recruiter in the hires data AND
+  // exactly one server member carries that name. Anything unsure (a duplicate
+  // name like the six "Rob Super"s, or no clear hire) stays FLAT — no upline —
+  // for a human to confirm. A wrong upline poisons the tree worse than a blank.
+  const hires = await getAllHiresForUpline();
+  const recruitersByName = new Map(); // normName -> Set(recruiter_id)
+  for (const h of hires) {
+    const nn = normName(h.recruit_name);
+    if (!nn || !h.recruiter_id) continue;
+    if (!recruitersByName.has(nn)) recruitersByName.set(nn, new Set());
+    recruitersByName.get(nn).add(h.recruiter_id);
+  }
+  const memberNameCount = new Map(); // normName -> how many members carry it
+  for (const m of members) {
+    const nn = normName(m.name);
+    if (nn) memberNameCount.set(nn, (memberNameCount.get(nn) || 0) + 1);
+  }
+  const confidentUpline = (name) => {
+    const nn = normName(name);
+    if (!nn) return null;
+    if ((memberNameCount.get(nn) || 0) !== 1) return null;   // duplicate member name → unsure
+    const recs = recruitersByName.get(nn);
+    if (!recs || recs.size !== 1) return null;               // zero or many recruiters → unsure
+    const recruiterId = [...recs][0];
+    if (!teamMemberIds.has(recruiterId)) return null;        // recruiter isn't a real node → unsure
+    return recruiterId;
+  };
+
   if (dryRun) {
-    return { scanned: members.length, alreadyIn: members.length - newcomers.length, added: 0, newcomers };
+    const placeable = newcomers.filter((m) => confidentUpline(m.name)).length;
+    return {
+      scanned: members.length,
+      alreadyIn: members.length - newcomers.length,
+      added: 0,
+      placedUnderRecruiter: placeable,
+      newcomers,
+    };
   }
 
   let added = 0;
+  let placed = 0;
   for (const m of newcomers) {
     try {
-      // Only id + name: upsertTeamMember (read-merge-write) fills upline=null,
-      // base_shop=false, is_master=null for a brand-new row, and preserves the
-      // fields of anyone already present. We only pass newcomers, so nothing
-      // curated is ever touched.
-      await upsertTeamMember({ userId: m.id, name: m.name });
+      const uplineId = confidentUpline(m.name);
+      // Only id + name (+ uplineId when certain): upsertTeamMember is
+      // read-merge-write, so a new row gets base_shop=false / is_master=null and
+      // anyone already present is preserved. We only pass newcomers, so nothing
+      // curated is ever touched; the upline is set only on a confident match.
+      await upsertTeamMember(uplineId ? { userId: m.id, name: m.name, uplineId } : { userId: m.id, name: m.name });
       added++;
+      if (uplineId) placed++;
       if (onProgress && added % 50 === 0) onProgress(added);
     } catch (e) {
       console.error(`[member-sync] failed to add ${m.name} (${m.id}):`, e.message || e);
     }
   }
-  return { scanned: members.length, alreadyIn: members.length - newcomers.length, added, newcomers: [] };
+  return {
+    scanned: members.length,
+    alreadyIn: members.length - newcomers.length,
+    added,
+    placedUnderRecruiter: placed,
+    newcomers: [],
+  };
 }
 
 module.exports = { syncAllMembers, fetchAllMembers };
