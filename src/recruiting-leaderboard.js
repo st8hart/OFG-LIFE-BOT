@@ -412,11 +412,18 @@ async function handleHireModal(interaction, client) {
       try { const u = await client.users.fetch(uplineId); uplineName = u.globalName || u.username || uplineId; } catch (__) {}
     }
 
-    await addHire({
+    const hireResult = await addHire({
       recruitName: name, state, licensed, source,
       recruiterId: uplineId, recruiterName: uplineName,
       notes: `Logged by ${interaction.user.id}`,
     });
+    // Already on the books (logged in the hub or a prior /addhire) — skip the
+    // card + celebrations so nothing double-counts or double-announces.
+    if (hireResult?.duplicate) {
+      return interaction.editReply({
+        content: `⚠️ **${name}** is already logged as a hire — I skipped it so it doesn't double-count. If this is genuinely a different person with the same name, add them from the hub Hire Log.`,
+      });
+    }
 
     const stats = await getUserHireStats(uplineId);
     const tree  = await getTeamTree();

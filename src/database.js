@@ -922,6 +922,20 @@ async function removeUnassignedProducer(userId) {
 // All Central-time windowing reuses the same helpers the sales boards use.
 
 async function addHire({ recruitName, state, licensed, source, recruiterId, recruiterName, notes }) {
+  // Dedupe guard (Sebastian, July 13): the same recruit can be logged from the
+  // hub too (Hire Log / prospect flywheel). If a hire with this name already
+  // exists in the last 60 days, DON'T insert a twin — return { duplicate } so
+  // the /addhire handler tells the admin instead of double-counting. Best-
+  // effort: any error here never blocks a real hire.
+  try {
+    const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const since = new Date(Date.now() - 60 * 864e5).toISOString();
+    const { data: recent } = await supabase.from('hires').select('id, recruit_name').gte('created_at', since);
+    const want = norm(recruitName);
+    const dup = (recent || []).find((h) => norm(h.recruit_name) === want);
+    if (dup) return { id: dup.id, duplicate: true };
+  } catch (_) { /* dedupe is best-effort */ }
+
   const { data, error } = await supabase.from('hires').insert([{
     recruit_name: recruitName,
     state: state || '',
