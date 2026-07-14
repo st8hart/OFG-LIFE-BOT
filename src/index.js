@@ -236,12 +236,15 @@ async function handleSaleModal(interaction) {
   await interaction.deferReply({ ephemeral: true });
 
   try {
-    // Presentation / Carrier / Product are fixed dropdown picks encoded in the
-    // customId as "saleModal:<presentation>|<carrier>|<product>". Only Lead Type
-    // and AP come from the modal's text inputs.
+    // Presentation / Carrier / Product / Lead Type are fixed dropdown picks
+    // encoded in the customId as
+    //   "saleModal:<presentation>|<carrier>|<product>|<leadType>"
+    // Only AP comes from the modal's text input. (Older sales submitted before
+    // Lead Type became a dropdown had a 3-part customId — the fallback below
+    // keeps those from crashing if one is somehow still in flight.)
     const encoded = interaction.customId.slice('saleModal:'.length);
-    const [presentationType = 'Unknown', carrier = 'Unknown', product = 'Unknown'] = encoded.split('|');
-    const leadType         = interaction.fields.getTextInputValue('leadType').trim();
+    const [presentationType = 'Unknown', carrier = 'Unknown', product = 'Unknown', leadTypeRaw = 'Unknown'] = encoded.split('|');
+    const leadType         = String(leadTypeRaw).trim() || 'Unknown';
     const premiumRaw       = interaction.fields.getTextInputValue('premium').trim();
     const premium = parseFloat(premiumRaw.replace(/[$,]/g, ''));
     if (isNaN(premium) || premium <= 0) {

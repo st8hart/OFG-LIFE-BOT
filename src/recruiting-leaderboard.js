@@ -30,6 +30,8 @@ const CARD_COLOR = 0x2ECC71;
 const SOURCE_LABELS = {
   personal:        'Personal',
   urs:             'URS',
+  urs_rms:         'URS-RMS',
+  rms:             'RMS',
   starting_10:     'Starting 10',
   paid_recruiting: 'Paid Recruiting',
 };
@@ -369,6 +371,8 @@ const addHireCommand = {
       .addChoices(
         { name: 'Personal',        value: 'personal' },
         { name: 'URS',             value: 'urs' },
+        { name: 'URS-RMS',         value: 'urs_rms' },
+        { name: 'RMS',             value: 'rms' },
         { name: 'Starting 10',     value: 'starting_10' },
         { name: 'Paid Recruiting', value: 'paid_recruiting' },
       )),

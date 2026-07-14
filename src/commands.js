@@ -15,13 +15,13 @@ const { buildLeaderboardEmbed, formatMoney } = require('./leaderboard');
 // ── /sale ─────────────────────────────────────────────────────────────────────
 // NOTE: Discord modals only support text inputs — no dropdowns inside a modal.
 // Anything that should be a FIXED, pick-from-a-list value (Presentation Type,
-// Carrier, Product) is a required slash-command option (a real Discord dropdown)
-// chosen BEFORE the modal opens. Those three selections are encoded in the modal
-// customId — "saleModal:<presentation>|<carrier>|<product>" — so handleSaleModal
-// can read them on submit. The modal itself only collects the free-text fields
-// that change every time (Lead Type, Submitted AP).
+// Carrier, Product, Lead Type) is a required slash-command option (a real Discord
+// dropdown) chosen BEFORE the modal opens. Those four selections are encoded in
+// the modal customId — "saleModal:<presentation>|<carrier>|<product>|<leadType>"
+// — so handleSaleModal can read them on submit. The modal itself only collects
+// the free-text field that changes every time (Submitted AP).
 //
-// To change the dropdown options later, edit ONLY the two arrays below — the
+// To change the dropdown options later, edit ONLY the three arrays below — the
 // command picks them up automatically. (Discord allows up to 25 choices each.)
 const SALE_CARRIERS = [
   'Mutual of Omaha',
@@ -47,6 +47,19 @@ const SALE_PRODUCTS = [
   'IUL',
   'TERM',
   'TERM ROP',
+];
+
+// Lead Type — a REQUIRED dropdown on /sale. Order here = order in the dropdown.
+const SALE_LEAD_TYPES = [
+  'A',
+  'AA',
+  'A1',
+  'B',
+  'C',
+  'D',
+  'E',
+  'Referral',
+  'Inbound',
 ];
 
 const saleCommand = {
@@ -75,24 +88,26 @@ const saleCommand = {
         .setDescription('Which product type?')
         .setRequired(true)
         .addChoices(...SALE_PRODUCTS.map(p => ({ name: p, value: p })))
+    )
+    .addStringOption(opt =>
+      opt.setName('lead_type')
+        .setDescription('What kind of lead was this?')
+        .setRequired(true)
+        .addChoices(...SALE_LEAD_TYPES.map(l => ({ name: l, value: l })))
     ),
   async execute(interaction) {
     const presentationType = interaction.options.getString('presentation_type');
     const carrier          = interaction.options.getString('carrier');
     const product          = interaction.options.getString('product');
-    // Encode all three fixed selections in the customId so they survive the
+    const leadType         = interaction.options.getString('lead_type');
+    // Encode all four fixed selections in the customId so they survive the
     // modal round-trip. None of the option values contain ':' or '|', so this
-    // is safe to split back apart in handleSaleModal.
+    // is safe to split back apart in handleSaleModal. (Well under Discord's
+    // 100-char customId limit.)
     const modal = new ModalBuilder()
-      .setCustomId(`saleModal:${presentationType}|${carrier}|${product}`)
+      .setCustomId(`saleModal:${presentationType}|${carrier}|${product}|${leadType}`)
       .setTitle('Log New Sale - OFG');
     modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId('leadType').setLabel('Lead Type')
-          .setStyle(TextInputStyle.Short)
-          .setPlaceholder('e.g. A Lead, B Lead, Referral, D Lead')
-          .setRequired(true)
-      ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder().setCustomId('premium').setLabel('Submitted AP ($)')
           .setStyle(TextInputStyle.Short)
