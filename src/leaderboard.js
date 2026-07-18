@@ -153,7 +153,7 @@ async function buildLeaderboardEmbed(period, prevWeek = false, prevDay = false, 
       name: '📊 Badge Guide',
       value: [
         `**Rank** · Monthly AP production`,
-        `🚀 $0+ · ⚔️ $5k+ · 🛡️ $10k+ · 👑 $25k+ · 💎 $50k+ · 🏆 $100k+`,
+        `🚀 $0+ · ⚔️ $5k+ · 🛡️ $10k+ · 👑 $25k+ · 💎 $50k+ · 🔱 $75k+ · 🏆 $100k+`,
         ``,
         `**Achievement Badges**`,
         `🎖️ Reigning Champ · 🏋️ Biggest Sale of the Month`,

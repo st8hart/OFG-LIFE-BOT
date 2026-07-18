@@ -338,7 +338,8 @@ function getRanks() {
     { id: 3, name: 'Conqueror',     min_monthly: 10000,  color: '#9B59B6', emoji: '🛡️' },
     { id: 4, name: 'Odyssey Elite', min_monthly: 25000,  color: '#F1C40F', emoji: '👑' },
     { id: 5, name: 'Titan',         min_monthly: 50000,  color: '#E74C3C', emoji: '💎' },
-    { id: 6, name: 'Legend',        min_monthly: 100000, color: '#FF6B00', emoji: '🏆' },
+    { id: 6, name: 'Immortal',      min_monthly: 75000,  color: '#C084FC', emoji: '🔱' },
+    { id: 7, name: 'Legend',        min_monthly: 100000, color: '#FF6B00', emoji: '🏆' },
   ];
 }
 
