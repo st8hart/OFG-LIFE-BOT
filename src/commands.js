@@ -421,6 +421,14 @@ const myPersonalGoalCommand = {
     ),
   async execute(interaction) {
     const amount = interaction.options.getInteger('amount');
+    // Goals start at the $15K standard (Sebastian, July 17) — same floor the
+    // hub enforces, so neither door lets a sub-standard goal in.
+    if (amount < 15000) {
+      return interaction.reply({
+        content: `🎯 Goals start at the **$15K standard** — set **$15,000 or higher**. That's the floor every writer is already held to.`,
+        ephemeral: true,
+      });
+    }
     const displayName = interaction.user.displayName || interaction.user.username;
     await setPersonalGoal(interaction.user.id, displayName, amount);
 
