@@ -922,6 +922,24 @@ async function removeUnassignedProducer(userId) {
 // upline's Discord id), since a brand-new hire usually has no Discord account yet.
 // All Central-time windowing reuses the same helpers the sales boards use.
 
+// The Discord source is law (Sebastian, July 23): translate the recruiter's
+// hand-picked source code into the hub's 4-leg avenue and STAMP it on the hire,
+// so the hub's Ledger/Pipeline show the real leg instead of re-guessing it from
+// GoHighLevel (which collapsed everyone to "Warm"). MUST mirror SOURCE_AVENUE
+// in the hub's server/recruitingSync.js. RMS is the Unitrust missed-URS
+// re-upload, so it counts as URS.
+const AVENUE_BY_SOURCE = {
+  personal: 'warm',
+  urs: 'urs',
+  urs_rms: 'urs',
+  rms: 'urs',
+  starting_10: 's10',
+  paid_recruiting: 'paid',
+};
+function avenueFromSource(source) {
+  return AVENUE_BY_SOURCE[String(source || '').trim().toLowerCase()] || null;
+}
+
 async function addHire({ recruitName, state, licensed, source, recruiterId, recruiterName, notes }) {
   // Dedupe guard (Sebastian, July 13): the same recruit can be logged from the
   // hub too (Hire Log / prospect flywheel). If a hire with this name already
@@ -937,7 +955,7 @@ async function addHire({ recruitName, state, licensed, source, recruiterId, recr
     if (dup) return { id: dup.id, duplicate: true };
   } catch (_) { /* dedupe is best-effort */ }
 
-  const { data, error } = await supabase.from('hires').insert([{
+  const base = {
     recruit_name: recruitName,
     state: state || '',
     licensed: !!licensed,
@@ -945,7 +963,15 @@ async function addHire({ recruitName, state, licensed, source, recruiterId, recr
     recruiter_id: recruiterId,
     recruiter_name: (recruiterName && String(recruiterName).trim()) || recruiterId,
     notes: notes || '',
-  }]).select().single();
+  };
+  const avenue = avenueFromSource(source);
+  // Write the avenue alongside the source. If the column is missing in this
+  // environment, retry WITHOUT it — logging a hire must never fail over an
+  // optional attribution field.
+  let { data, error } = await supabase.from('hires').insert([avenue ? { ...base, avenue } : base]).select().single();
+  if (error && avenue && /column .*avenue/i.test(error.message || '')) {
+    ({ data, error } = await supabase.from('hires').insert([base]).select().single());
+  }
   if (error) throw error;
   return data;
 }
