@@ -12,6 +12,7 @@ const {
   getUserDailyTotal, getUserWeeklyTotal,
   getTeamDailyTotal,
   getTeamTree, recordUnassignedProducer,
+  getSaleById,
 } = require('./database');
 const { buildLeaderboardEmbed, formatMoney } = require('./leaderboard');
 const {
@@ -257,22 +258,8 @@ async function handleSaleModal(interaction) {
     || interaction.user?.tag
     || `Agent_${interaction.user.id}`;
 
-  // Check if this is their first ever sale
-  const totalSalesBefore = await getUserTotalSales(interaction.user.id);
-  const isFirstEver = totalSalesBefore === 0;
 
-  // Check if this is first sale of the day for ANYONE on the team
-  const teamDailyCountBefore = await getTeamDailySalesCount();
-  const isFirstOfDay = teamDailyCountBefore === 0;
-
-  // Get current monthly top sale before adding
-  const prevTopSale = await getMonthlyTopSale();
-
-  // Capture personal bests BEFORE adding the sale so we can compare after
-  const statsBefore    = await getUserStats(interaction.user.id);
-  const prevBestSale   = await getPersonalBestSale(interaction.user.id);
-
-  await addSale({
+  const sale = await addSale({
     userId: interaction.user.id,
     username: displayName || String(interaction.user.id),
     clientName: product,
@@ -281,20 +268,81 @@ async function handleSaleModal(interaction) {
     notes: `Lead: ${leadType} | Presentation: ${presentationType}`,
   });
 
+  const { stats, newRank, personalBests } = await runSaleAnnouncements({
+    userId: interaction.user.id, displayName, saleId: sale?.id ?? null,
+    carrier, product, leadType, presentationType, premium,
+  });
+
+
+  await interaction.editReply({
+    content: [
+      `✅ Sale logged! ${formatMoney(premium)} AP`,
+      `📊 Monthly: ${formatMoney(stats?.monthly_total)} · ${newRank.emoji} ${newRank.name}`,
+      ...(personalBests.length ? [``, ...personalBests] : []),
+    ].join('\n'),
+  });
+
+  } catch (err) {
+    console.error('handleSaleModal error:', err);
+    try {
+      await interaction.editReply({ content: '❌ Something went wrong logging your sale. Please try again or contact an admin.' });
+    } catch (_) {}
+  }
+}
+
+
+// ── The sale pipeline ─────────────────────────────────────────────────────────
+// Everything that happens once a sale row exists: the alert embed, the milestone
+// shoutout, whale/first-blood/rank-up/record calls, challenge scores, team
+// momentum, the goal auto-bump, and the agent's private personal bests.
+//
+// It lives out here rather than inside the /sale handler because /sale is not
+// the only way a sale gets written any more — the OFG Hub's CRM writes straight
+// to the same table, and a sale that lands without this running is a sale the
+// board never celebrates. One function, both doors, no second copy of the
+// milestone ladder to drift.
+//
+// It takes a row that ALREADY EXISTS and `saleId` is how the before-and-after
+// comparisons stay honest: every "was this their first ever / the biggest of
+// the month / their best day" read excludes that one row, so the answer is what
+// it would have been a moment before the insert. Two agents closing in the same
+// second get the right answers this way, which the old read-then-insert order
+// could not promise.
+//
+// Returns what the caller needs to reply with; it sends nothing to the caller
+// itself. Personal bests come back as strings because /sale shows them
+// privately in its reply and the hub path DMs them instead.
+async function runSaleAnnouncements({ userId, displayName, saleId, carrier, product, leadType, presentationType, premium }) {
+  let avatarUrl = null;
+  try { avatarUrl = (await client.users.fetch(userId)).displayAvatarURL({ extension: 'png', size: 256 }); } catch (_) {}
+
+  // Check if this is their first ever sale
+  const totalSalesBefore = await getUserTotalSales(userId, saleId);
+  const isFirstEver = totalSalesBefore === 0;
+
+  // Check if this is first sale of the day for ANYONE on the team
+  const teamDailyCountBefore = await getTeamDailySalesCount(saleId);
+  const isFirstOfDay = teamDailyCountBefore === 0;
+
+  // Get current monthly top sale before adding
+  const prevTopSale = await getMonthlyTopSale(saleId);
+
+  // Capture personal bests BEFORE adding the sale so we can compare after
+  const statsBefore    = await getUserStats(userId, saleId);
+  const prevBestSale   = await getPersonalBestSale(userId, saleId);
+
   // Alert leadership if this seller isn't placed under a base shop / leader yet.
   try {
     const tree = await getTeamTree();
-    if (!tree.getBaseShopOwner(interaction.user.id)) {
-      const avatarUrl = interaction.user.displayAvatarURL({ extension: 'png', size: 256 });
-
+    if (!tree.getBaseShopOwner(userId)) {
       // Save / update their profile in Supabase so there's a record to act on.
       try {
-        await recordUnassignedProducer({ userId: interaction.user.id, name: displayName, avatarUrl });
+        await recordUnassignedProducer({ userId, name: displayName, avatarUrl });
       } catch (e) { console.error('recordUnassignedProducer failed:', e.message); }
 
       // DM the leaders (once per session) with a nice card.
-      if (!alertedUnassigned.has(interaction.user.id)) {
-        alertedUnassigned.add(interaction.user.id);
+      if (!alertedUnassigned.has(userId)) {
+        alertedUnassigned.add(userId);
 
         const alertEmbed = new EmbedBuilder()
           .setColor(0xE74C3C)
@@ -303,8 +351,8 @@ async function handleSaleModal(interaction) {
           .setDescription(`**${displayName}** just logged a deal but isn't placed under a base shop or leader yet. Let's get them assigned so their production rolls up to the right team. 💪`)
           .addFields(
             { name: '👤 Name', value: displayName, inline: true },
-            { name: '🆔 Discord ID', value: `\`${interaction.user.id}\``, inline: true },
-            { name: '👋 Mention', value: `<@${interaction.user.id}>`, inline: true },
+            { name: '🆔 Discord ID', value: `\`${userId}\``, inline: true },
+            { name: '👋 Mention', value: `<@${userId}>`, inline: true },
             { name: '💵 Deal Logged', value: `${formatMoney(premium)}${carrier ? ' · ' + carrier : ''}`, inline: false },
             { name: '✅ Next Step', value: 'Run `/teamassign` to drop them under a **base shop** and a **leader**.', inline: false },
           )
@@ -333,13 +381,13 @@ async function handleSaleModal(interaction) {
     }
   } catch (err) { console.error('Unassigned-producer alert failed:', err.message); }
 
-  const stats = await getUserStats(interaction.user.id);
+  const stats = await getUserStats(userId);
   const prevMonthlyTotal = (stats?.monthly_total || 0) - premium;
   const prevRank = getRankForAmount(prevMonthlyTotal);
   const newRank = getRankForAmount(stats?.monthly_total || 0);
   const leveledUp = prevRank.name !== newRank.name;
 
-  const dailyCount = await getDailySalesCount(interaction.user.id);
+  const dailyCount = await getDailySalesCount(userId);
   const isHotStreak = dailyCount >= 3;
 
   const salesChannelId = process.env.SALES_CHANNEL_ID;
@@ -373,7 +421,7 @@ async function handleSaleModal(interaction) {
 
       // Shoutout fires separately at 3+ sales
       if (milestone?.shoutout) {
-        await channel.send(milestone.shoutout(interaction.user.id));
+        await channel.send(milestone.shoutout(userId));
       }
 
       // Whale alert for sales over $3000
@@ -382,7 +430,7 @@ async function handleSaleModal(interaction) {
           ``,
           `🐳🚨 WHALE ALERT! 🚨🐳`,
           ``,
-          `<@${interaction.user.id}> just landed a ${formatMoney(premium)} AP sale!`,
+          `<@${userId}> just landed a ${formatMoney(premium)} AP sale!`,
           `That is a BIG one! Keep it going! 💰💰💰`,
           ``,
         ].join('\n'));
@@ -394,7 +442,7 @@ async function handleSaleModal(interaction) {
           ``,
           `🎊✨ WELCOME TO THE BOARD! ✨🎊`,
           ``,
-          `<@${interaction.user.id}> just logged their FIRST EVER SALE at OFG!`,
+          `<@${userId}> just logged their FIRST EVER SALE at OFG!`,
           `${formatMoney(premium)} AP to kick things off - the journey begins NOW!`,
           `Welcome to the team! 🚀`,
           ``,
@@ -407,7 +455,7 @@ async function handleSaleModal(interaction) {
           ``,
           `🌅 FIRST BLOOD! 🌅`,
           ``,
-          `<@${interaction.user.id}> just opened the board today with ${formatMoney(premium)} AP!`,
+          `<@${userId}> just opened the board today with ${formatMoney(premium)} AP!`,
           `The hunt is ON. Who is next? 🔥`,
           ``,
         ].join('\n'));
@@ -419,7 +467,7 @@ async function handleSaleModal(interaction) {
           ``,
           `⬆️🎉 RANK UP! 🎉⬆️`,
           ``,
-          `<@${interaction.user.id}> just leveled up to ${newRank.emoji} ${newRank.name}!`,
+          `<@${userId}> just leveled up to ${newRank.emoji} ${newRank.name}!`,
           `From ${prevRank.emoji} ${prevRank.name} to ${newRank.emoji} ${newRank.name} - LETS GO! 🔥`,
           ``,
         ].join('\n'));
@@ -431,34 +479,34 @@ async function handleSaleModal(interaction) {
           ``,
           `💥 BIGGEST MONTHLY SALE! 💥`,
           ``,
-          `<@${interaction.user.id}> just set the record for the biggest sale of the month with ${formatMoney(premium)} AP!`,
+          `<@${userId}> just set the record for the biggest sale of the month with ${formatMoney(premium)} AP!`,
           `Can anyone top it before the month ends? 🔥`,
           ``,
         ].join('\n'));
       }
 
       // Check daily total record for this month
-      const myDailyTotal = await getUserDailyTotal(interaction.user.id);
+      const myDailyTotal = await getUserDailyTotal(userId);
       const { bestDay: monthBestDay, bestWeek: monthBestWeek } = await getMonthlyRecords();
       if ((!monthBestDay || myDailyTotal > monthBestDay.total) && myDailyTotal >= MONTHLY_RECORD_FLOORS.day) {
         await channel.send([
           ``,
           `🏅 BIGGEST SALES DAY THIS MONTH! 🏅`,
           ``,
-          `<@${interaction.user.id}> just had the biggest sales day of the month with ${formatMoney(myDailyTotal)} AP today!`,
+          `<@${userId}> just had the biggest sales day of the month with ${formatMoney(myDailyTotal)} AP today!`,
           `That is the day to beat! 🔥`,
           ``,
         ].join('\n'));
       }
 
       // Check weekly total record for this month
-      const myWeeklyTotal = await getUserWeeklyTotal(interaction.user.id);
+      const myWeeklyTotal = await getUserWeeklyTotal(userId);
       if ((!monthBestWeek || myWeeklyTotal > monthBestWeek.total) && myWeeklyTotal >= MONTHLY_RECORD_FLOORS.week) {
         await channel.send([
           ``,
           `🏅 BIGGEST SALES WEEK THIS MONTH! 🏅`,
           ``,
-          `<@${interaction.user.id}> just had the biggest sales week of the month with ${formatMoney(myWeeklyTotal)} AP this week!`,
+          `<@${userId}> just had the biggest sales week of the month with ${formatMoney(myWeeklyTotal)} AP this week!`,
           `The weekly bar has been raised! 💪🔥`,
           ``,
         ].join('\n'));
@@ -470,12 +518,12 @@ async function handleSaleModal(interaction) {
       // All time biggest day
       if (myDailyTotal > parseFloat(records.alltime_day_amount || 0)) {
         const prev = records.alltime_day_username ? `Previous record: ${formatMoney(records.alltime_day_amount)} by ${records.alltime_day_username}` : 'First all time record set!';
-        await setAllTimeRecord('day', myDailyTotal, interaction.user.id, displayName);
+        await setAllTimeRecord('day', myDailyTotal, userId, displayName);
         await channel.send([
           ``,
           `🌟 ALL TIME DAILY RECORD BROKEN! 🌟`,
           ``,
-          `<@${interaction.user.id}> just had the BIGGEST SALES DAY in OFG history with ${formatMoney(myDailyTotal)} AP in a single day!`,
+          `<@${userId}> just had the BIGGEST SALES DAY in OFG history with ${formatMoney(myDailyTotal)} AP in a single day!`,
           `That is an OFG LEGEND performance! 🏆🔥`,
           prev,
           ``,
@@ -485,12 +533,12 @@ async function handleSaleModal(interaction) {
       // All time biggest week
       if (myWeeklyTotal > parseFloat(records.alltime_week_amount || 0)) {
         const prev = records.alltime_week_username ? `Previous record: ${formatMoney(records.alltime_week_amount)} by ${records.alltime_week_username}` : 'First all time record set!';
-        await setAllTimeRecord('week', myWeeklyTotal, interaction.user.id, displayName);
+        await setAllTimeRecord('week', myWeeklyTotal, userId, displayName);
         await channel.send([
           ``,
           `🌟 ALL TIME WEEKLY RECORD BROKEN! 🌟`,
           ``,
-          `<@${interaction.user.id}> just had the BIGGEST SALES WEEK in OFG history with ${formatMoney(myWeeklyTotal)} AP this week!`,
+          `<@${userId}> just had the BIGGEST SALES WEEK in OFG history with ${formatMoney(myWeeklyTotal)} AP this week!`,
           `Absolutely UNSTOPPABLE! 🏆🔥`,
           prev,
           ``,
@@ -501,12 +549,12 @@ async function handleSaleModal(interaction) {
       const myMonthlyTotal = stats?.monthly_total || 0;
       if (myMonthlyTotal > parseFloat(records.alltime_month_amount || 0)) {
         const prev = records.alltime_month_username ? `Previous record: ${formatMoney(records.alltime_month_amount)} by ${records.alltime_month_username}` : 'First all time record set!';
-        await setAllTimeRecord('month', myMonthlyTotal, interaction.user.id, displayName);
+        await setAllTimeRecord('month', myMonthlyTotal, userId, displayName);
         await channel.send([
           ``,
           `🌟 ALL TIME MONTHLY RECORD BROKEN! 🌟`,
           ``,
-          `<@${interaction.user.id}> just had the BIGGEST SALES MONTH in OFG history with ${formatMoney(myMonthlyTotal)} AP!`,
+          `<@${userId}> just had the BIGGEST SALES MONTH in OFG history with ${formatMoney(myMonthlyTotal)} AP!`,
           `This is what LEGEND status looks like at OFG! 👑🏆🔥`,
           prev,
           ``,
@@ -519,27 +567,27 @@ async function handleSaleModal(interaction) {
       const apMilestones = [
         { at: 1000000, msg: [
           `👑 CAREER MILESTONE — $1,000,000 · OFG HALL OF FAME! 👑`, ``,
-          `<@${interaction.user.id}> just crossed **$1,000,000 in lifetime AP**! 💰💰💰`,
+          `<@${userId}> just crossed **$1,000,000 in lifetime AP**! 💰💰💰`,
           `A MILLION dollars in premium written — legend status, etched into OFG history forever. 🏆🌟🔥`,
         ] },
         { at: 500000, msg: [
           `🔥 CAREER MILESTONE — HALF A MILLION! 🔥`, ``,
-          `<@${interaction.user.id}> just crossed **$500,000 in lifetime AP**!`,
+          `<@${userId}> just crossed **$500,000 in lifetime AP**!`,
           `Halfway to a million. This is what relentless looks like. 👑💎`,
         ] },
         { at: 250000, msg: [
           `🌟 CAREER MILESTONE — QUARTER MILLION! 🌟`, ``,
-          `<@${interaction.user.id}> just crossed **$250,000 in lifetime AP**!`,
+          `<@${userId}> just crossed **$250,000 in lifetime AP**!`,
           `A quarter-million in premium. Elite company. 🏆💪`,
         ] },
         { at: 100000, msg: [
           `💎 CAREER MILESTONE — SIX FIGURES! 💎`, ``,
-          `<@${interaction.user.id}> just crossed **$100,000 in lifetime AP**!`,
+          `<@${userId}> just crossed **$100,000 in lifetime AP**!`,
           `Six figures of premium written. That's a real career taking shape. 👑🔥`,
         ] },
         { at: 50000, msg: [
           `🏆 CAREER MILESTONE — $50K CLUB! 🏆`, ``,
-          `<@${interaction.user.id}> just crossed **$50,000 in lifetime AP**! 💰`,
+          `<@${userId}> just crossed **$50,000 in lifetime AP**! 💰`,
           `The grind is paying off — and this is only the beginning. 🚀`,
         ] },
       ];
@@ -556,14 +604,14 @@ async function handleSaleModal(interaction) {
   }
 
   // Challenge updates — loop through ALL active challenges (user can have up to 3)
-  const challenges = await getActiveChallenges(interaction.user.id);
+  const challenges = await getActiveChallenges(userId);
   for (const challenge of challenges) {
     if (!salesChannelId) break;
     try {
       const ch = await client.channels.fetch(salesChannelId);
-      const isChallenger = challenge.challenger_id === interaction.user.id;
+      const isChallenger = challenge.challenger_id === userId;
       const opponentId = isChallenger ? challenge.challengee_id : challenge.challenger_id;
-      const myStats = await getUserStats(interaction.user.id);
+      const myStats = await getUserStats(userId);
       const oppStats = await getUserStats(opponentId);
       const myTotal = myStats?.daily_total || 0;
       const oppTotal = oppStats?.daily_total || 0;
@@ -572,9 +620,9 @@ async function handleSaleModal(interaction) {
       await ch.send([
         ``,
         `⚔️ CHALLENGE UPDATE`,
-        `<@${interaction.user.id}>: ${formatMoney(myTotal)} vs <@${opponentId}>: ${formatMoney(oppTotal)}`,
+        `<@${userId}>: ${formatMoney(myTotal)} vs <@${opponentId}>: ${formatMoney(oppTotal)}`,
         tied    ? `It's TIED! Better close another one! 🔥` :
-        leading ? `<@${interaction.user.id}> is in the LEAD! 🔥` :
+        leading ? `<@${userId}> is in the LEAD! 🔥` :
                   `<@${opponentId}> is leading — time to close! 💪`,
         ``,
       ].join('\n'));
@@ -691,21 +739,9 @@ async function handleSaleModal(interaction) {
     }
   }
 
-  await interaction.editReply({
-    content: [
-      `✅ Sale logged! ${formatMoney(premium)} AP`,
-      `📊 Monthly: ${formatMoney(stats?.monthly_total)} · ${newRank.emoji} ${newRank.name}`,
-      ...(personalBests.length ? [``, ...personalBests] : []),
-    ].join('\n'),
-  });
-
-  } catch (err) {
-    console.error('handleSaleModal error:', err);
-    try {
-      await interaction.editReply({ content: '❌ Something went wrong logging your sale. Please try again or contact an admin.' });
-    } catch (_) {}
-  }
+  return { stats, newRank, personalBests };
 }
+
 
 function getCentralHour() {
   return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' })).getHours();
@@ -1375,4 +1411,116 @@ function scheduleLeaderboards(client) {
   console.log('OFG Leaderboards scheduled in Central Time');
 }
 
+// ── The hub's door ────────────────────────────────────────────────────────────
+// The OFG Hub's CRM writes sales straight into the same `sales` table. Until
+// now the hub also posted its own copy of the alert embed, which meant the row
+// landed on every leaderboard but the board never reacted to it: no Hat Trick,
+// no First Blood, no whale, no rank up, no challenge score. Discord will not
+// let one bot run another bot's slash command, so /sale could never be the
+// answer.
+//
+// This is the answer instead: the hub says "row 1234 exists", and the bot runs
+// the same pipeline /sale runs. Every announcement is genuinely Apollo's,
+// because it IS Apollo — same process, same code, same channel.
+//
+// The hub does not get to describe the sale. It passes an id and nothing else;
+// every value announced is read back out of the row. A caller that could name
+// its own monthly total is a caller that could lie about it in a public feed.
+//
+// Requires HUB_SHARED_SECRET set here and the same value on the hub. Without
+// it the door stays shut and the hub keeps posting its own plain embed.
+const announcedSales = new Set();
+
+function startHubListener() {
+  const secret = process.env.HUB_SHARED_SECRET;
+  if (!secret) {
+    console.warn('[hub] HUB_SHARED_SECRET not set — hub sales will not be announced by the bot.');
+    return;
+  }
+  const port = process.env.PORT || 3000;
+
+  require('http').createServer(async (req, res) => {
+    const send = (code, obj) => {
+      res.writeHead(code, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(obj));
+    };
+
+    if (req.method === 'GET' && req.url === '/health') return send(200, { ok: true, ready: client.isReady() });
+    if (req.method !== 'POST' || req.url !== '/hub/sale-announce') return send(404, { error: 'not found' });
+
+    // Timing-safe would be nicer, but the value never leaves two Railway
+    // services and a mismatch is logged, not silently ignored.
+    if (req.headers['x-hub-secret'] !== secret) {
+      console.warn('[hub] rejected a call with a bad secret');
+      return send(401, { error: 'bad secret' });
+    }
+    if (!client.isReady()) return send(503, { error: 'bot still starting' });
+
+    let body = '';
+    for await (const chunk of req) {
+      body += chunk;
+      if (body.length > 4096) return send(413, { error: 'too big' });
+    }
+
+    let salesId;
+    try { salesId = Number(JSON.parse(body || '{}').salesId); } catch { return send(400, { error: 'bad json' }); }
+    if (!Number.isFinite(salesId) || salesId <= 0) return send(400, { error: 'salesId required' });
+
+    // A retry after a slow-but-successful call must not double-announce. The
+    // set is per-process, which is the same lifetime as the momentum and
+    // unassigned-producer guards above it.
+    if (announcedSales.has(salesId)) return send(200, { ok: true, announced: false, reason: 'already announced' });
+
+    try {
+      const sale = await getSaleById(salesId);
+      if (!sale) return send(404, { error: 'sale not found' });
+      announcedSales.add(salesId);
+
+      // The name on the row is whatever the hub's roster last wrote. Apollo's
+      // alerts have always used the Discord nickname — which in this server
+      // carries upline and state — so that is what this uses too.
+      let displayName = sale.username;
+      try {
+        const guild = await client.guilds.fetch(process.env.GUILD_ID);
+        const member = await guild.members.fetch(sale.user_id);
+        displayName = member?.displayName || displayName;
+      } catch (_) {}
+
+      const notes = sale.notes || '';
+      const { personalBests } = await runSaleAnnouncements({
+        userId: sale.user_id,
+        displayName: displayName || `Agent_${sale.user_id}`,
+        saleId: sale.id,
+        carrier: sale.carrier || 'Unknown',
+        product: sale.policy_type || 'Unknown',
+        leadType: (notes.match(/Lead:\s*([^|]+)/)?.[1] || 'Unknown').trim(),
+        presentationType: (notes.match(/Presentation:\s*([^|]+)/)?.[1] || 'Unknown').trim(),
+        premium: parseFloat(sale.premium) || 0,
+      });
+
+      // /sale shows these privately in its reply. There is no reply here, so
+      // they go by DM — the agent still hears it, nobody else does.
+      if (personalBests.length) {
+        try {
+          const user = await client.users.fetch(sale.user_id);
+          await user.send(personalBests.join('\n\n'));
+        } catch (e) { console.error('[hub] personal-best DM failed:', e.message); }
+      }
+
+      console.log(`[hub] announced sale ${salesId} for ${displayName}`);
+      send(200, { ok: true, announced: true });
+    } catch (err) {
+      // Let a genuine failure be retried: the sale is worth a second attempt.
+      announcedSales.delete(salesId);
+      console.error('[hub] announce failed:', err);
+      send(500, { error: err.message });
+    }
+  }).listen(port, () => console.log(`[hub] listening on ${port}`));
+}
+
+client.once(Events.ClientReady, startHubListener);
+
 client.login(process.env.DISCORD_TOKEN);
+
+// Exported for the smoke test in the hub repo; nothing in the bot imports this.
+module.exports = { runSaleAnnouncements };

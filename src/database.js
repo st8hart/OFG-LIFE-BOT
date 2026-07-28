@@ -133,11 +133,13 @@ async function getMonthlyTotalsMap(prevMonth = false) {
   return map;
 }
 
-async function getUserStats(userId) {
+async function getUserStats(userId, excludeSaleId = null) {
   const todayStart = getDayStart();
   const weekStart = getWeekStart();
   const monthStart = getMonthStart(false);
-  const { data, error } = await supabase.from('sales').select('premium, created_at').eq('user_id', userId);
+  let q = supabase.from('sales').select('premium, created_at').eq('user_id', userId);
+  if (excludeSaleId) q = q.neq('id', excludeSaleId);
+  const { data, error } = await q;
   if (error) throw error;
   const daily   = data.filter(s => new Date(s.created_at) >= todayStart);
   const weekly  = data.filter(s => new Date(s.created_at) >= weekStart);
@@ -204,8 +206,10 @@ async function getTeamStats() {
   };
 }
 
-async function getUserTotalSales(userId) {
-  const { data, error } = await supabase.from('sales').select('id').eq('user_id', userId);
+async function getUserTotalSales(userId, excludeSaleId = null) {
+  let q = supabase.from('sales').select('id').eq('user_id', userId);
+  if (excludeSaleId) q = q.neq('id', excludeSaleId);
+  const { data, error } = await q;
   if (error) throw error;
   return data.length;
 }
@@ -218,9 +222,11 @@ async function getDailySalesCount(userId) {
 }
 
 // Returns total sales count across the ENTIRE team today — used for First Blood check
-async function getTeamDailySalesCount() {
+async function getTeamDailySalesCount(excludeSaleId = null) {
   const start = getDayStart();
-  const { data, error } = await supabase.from('sales').select('id').gte('created_at', start.toISOString());
+  let q = supabase.from('sales').select('id').gte('created_at', start.toISOString());
+  if (excludeSaleId) q = q.neq('id', excludeSaleId);
+  const { data, error } = await q;
   if (error) throw error;
   return data.length;
 }
@@ -292,9 +298,11 @@ async function getChallengeStandings() {
   return data || [];
 }
 
-async function getMonthlyTopSale() {
+async function getMonthlyTopSale(excludeSaleId = null) {
   const start = getMonthStart(false);
-  const { data, error } = await supabase.from('sales').select('premium, user_id, username').gte('created_at', start.toISOString()).order('premium', { ascending: false }).limit(1);
+  let q = supabase.from('sales').select('premium, user_id, username').gte('created_at', start.toISOString());
+  if (excludeSaleId) q = q.neq('id', excludeSaleId);
+  const { data, error } = await q.order('premium', { ascending: false }).limit(1);
   if (error) throw error;
   return data[0] || null;
 }
@@ -816,10 +824,10 @@ async function getReigningChampionId() {
 }
 
 // Returns the highest single sale premium a user has ever logged (all time)
-async function getPersonalBestSale(userId) {
-  const { data, error } = await supabase.from('sales')
-    .select('premium')
-    .eq('user_id', userId)
+async function getPersonalBestSale(userId, excludeSaleId = null) {
+  let q = supabase.from('sales').select('premium').eq('user_id', userId);
+  if (excludeSaleId) q = q.neq('id', excludeSaleId);
+  const { data, error } = await q
     .order('premium', { ascending: false })
     .limit(1);
   if (error || !data.length) return 0;
