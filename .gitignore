@@ -2,3 +2,7 @@ node_modules/
 .env
 sales.db
 *.db-journal
+
+# A scratch copy of .env.example with the REAL values filled in — it held a live
+# DISCORD_TOKEN in plaintext. Ignored so it can never be committed.
+a.md
