@@ -313,7 +313,7 @@ async function handleSaleModal(interaction) {
 // Returns what the caller needs to reply with; it sends nothing to the caller
 // itself. Personal bests come back as strings because /sale shows them
 // privately in its reply and the hub path DMs them instead.
-async function runSaleAnnouncements({ userId, displayName, saleId, carrier, product, leadType, presentationType, premium }) {
+async function runSaleAnnouncements({ userId, displayName, saleId, carrier, product, leadType, presentationType, premium, progress }) {
   let avatarUrl = null;
   try { avatarUrl = (await client.users.fetch(userId)).displayAvatarURL({ extension: 'png', size: 256 }); } catch (_) {}
 
@@ -391,6 +391,24 @@ async function runSaleAnnouncements({ userId, displayName, saleId, carrier, prod
   const dailyCount = await getDailySalesCount(userId);
   const isHotStreak = dailyCount >= 3;
 
+  // `progress` is an optional out-param: the caller's own object, stamped the
+  // moment the SALE ALERT reaches the channel. /sale doesn't pass one.
+  //
+  // The hub's door does, because it has to answer the hub, and the hub only
+  // posts its fallback embed when it hears that nothing went out. Everything
+  // below runs inside catches that log and carry on — right for /sale, where a
+  // Discord hiccup must never fail the interaction or lose the row, but it means
+  // a swallowed failure is indistinguishable from a success from the outside.
+  //
+  // It has to be an out-param rather than a return value: the pipeline can also
+  // throw AFTER the alert posted (getActiveChallenges and getGoal below are not
+  // inside a catch), and a return value is gone by the time that lands in the
+  // door's catch — where it is the difference between the hub staying quiet and
+  // the hub posting a second alert for the same sale.
+  //
+  // This one send is the right thing to report on: if it throws the rest of the
+  // block is skipped too, and it is precisely the message the hub's fallback
+  // would replace — so "not stamped" means "post yours", with no risk of two.
   const salesChannelId = process.env.SALES_CHANNEL_ID;
   if (salesChannelId) {
     try {
@@ -419,6 +437,7 @@ async function runSaleAnnouncements({ userId, displayName, saleId, carrier, prod
         timestamp: new Date().toISOString(),
       };
       await channel.send({ embeds: [embed] });
+      if (progress) progress.alertPosted = true;
 
       // Shoutout fires separately at 3+ sales
       if (milestone?.shoutout) {
@@ -1491,6 +1510,7 @@ function startHubListener() {
     if (!Number.isFinite(salesId) || salesId <= 0) return send(400, { error: 'salesId required' });
 
     let claimed = false;
+    const progress = { alertPosted: false };
     try {
       const sale = await getSaleById(salesId);
       if (!sale) return send(404, { error: 'sale not found' });
@@ -1519,6 +1539,7 @@ function startHubListener() {
 
       const notes = sale.notes || '';
       const { personalBests } = await runSaleAnnouncements({
+        progress,
         userId: sale.user_id,
         displayName: displayName || `Agent_${sale.user_id}`,
         saleId: sale.id,
@@ -1528,6 +1549,24 @@ function startHubListener() {
         presentationType: (notes.match(/Presentation:\s*([^|]+)/)?.[1] || 'Unknown').trim(),
         premium: parseFloat(sale.premium) || 0,
       });
+
+      // The pipeline swallows Discord failures by design — a hiccup must never
+      // cost the row. That is right for /sale and wrong here: a silent 200 tells
+      // the hub the sale was announced and stops it posting its own embed, so
+      // the sale ends up with NO message from either side. That is the one thing
+      // the spec says can never happen (17-APOLLO-SALE-HOOK.md, VERIFY #7).
+      //
+      // 503 is the code the hub reads as "the door didn't open, nothing was
+      // posted" — it falls back to its own embed and the board still hears about
+      // the sale, plainly. The claim goes back so a retry isn't locked out.
+      if (!progress.alertPosted) {
+        console.error(`[hub] sale ${salesId}: the alert never reached the channel — telling the hub to post its own`);
+        if (claimed) {
+          try { await releaseSaleAnnouncement(salesId); }
+          catch (e) { console.error('[hub] could not release the claim:', e.message); }
+        }
+        return send(503, { error: 'the sale alert did not reach the channel' });
+      }
 
       // /sale shows these privately in its reply. There is no reply here, so
       // they go by DM — the agent still hears it, nobody else does.
@@ -1541,15 +1580,28 @@ function startHubListener() {
       console.log(`[hub] announced sale ${salesId} for ${displayName}`);
       send(200, { ok: true, announced: true });
     } catch (err) {
-      // Let a genuine failure be retried: the sale is worth a second attempt.
-      // Only release a claim THIS request took — a failure in the lookup above
-      // must not hand back a claim a concurrent request is still announcing on.
+      console.error('[hub] announce failed:', err);
+
+      // 503 or 500, and the difference is whether the alert already went out.
+      //
+      // The hub falls back to its own embed on 503 and stays quiet on anything
+      // else (discordSales.js:281). Both behaviours are right, for different
+      // failures. A database blip in the lookup or the claim means nothing was
+      // posted, so silence would lose the sale's announcement entirely — 503,
+      // fall back. But the pipeline can also throw after the alert is already in
+      // the channel (getActiveChallenges and getGoal sit outside a catch), and
+      // there 503 would put a second alert for one sale in a public feed. That
+      // is the case 500 exists for: we may have posted, so don't post again.
+      if (progress.alertPosted) return send(500, { error: err.message });
+
+      // Nothing went out — let a retry through, and only release a claim THIS
+      // request took, so a failed lookup can't hand back a claim a concurrent
+      // request is still announcing on.
       if (claimed) {
         try { await releaseSaleAnnouncement(salesId); }
         catch (e) { console.error('[hub] could not release the claim:', e.message); }
       }
-      console.error('[hub] announce failed:', err);
-      send(500, { error: err.message });
+      send(503, { error: err.message });
     }
   }).listen(port, () => console.log(`[hub] listening on ${port}`));
 }
