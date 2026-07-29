@@ -382,6 +382,34 @@ async function getSaleById(saleId) {
   return data;
 }
 
+// ── Announce-once guard ───────────────────────────────────────────────────────
+// The hub can ask us to announce the same sale twice — a retry, a double-click,
+// or a Railway redeploy that kills the request after we posted but before we
+// answered. Two whale alerts for one deal is worse than a plain announcement, so
+// the claim has to outlive the process: an in-memory Set forgets everything the
+// moment the container restarts, which is exactly when a retry arrives.
+//
+// `settings.key` is the primary key (verified against the live schema), so a
+// plain INSERT is an atomic claim — the first caller in wins and every later one
+// comes back with a 23505 unique violation. Nothing to run by hand before this
+// ships. The keys are namespaced `sale_announced:<id>`, and every reader of
+// `settings` in both repos looks its key up by name or prefix rather than
+// scanning the table, so they are invisible to everything else.
+
+// True only for the caller that gets to do the announcing.
+async function claimSaleAnnouncement(saleId) {
+  const { error } = await supabase.from('settings')
+    .insert({ key: `sale_announced:${saleId}`, value: new Date().toISOString() });
+  if (!error) return true;
+  if (error.code === '23505') return false;   // somebody already claimed it
+  throw error;
+}
+
+// Hand the claim back when the announcement itself blew up, so a retry can run.
+async function releaseSaleAnnouncement(saleId) {
+  await supabase.from('settings').delete().eq('key', `sale_announced:${saleId}`);
+}
+
 // ── Personal Goals ───────────────────────────────────────────────────────────
 
 async function setPersonalGoal(userId, username, amount) {
@@ -1240,6 +1268,7 @@ module.exports = {
   getUserDailyTotal, getUserWeeklyTotal,
   setPersonalGoal, getPersonalGoal, getAllPersonalGoals,
   editSale, getSaleById,
+  claimSaleAnnouncement, releaseSaleAnnouncement,
   getUserTotalSales, getDailySalesCount, getTeamDailySalesCount, getMonthlyTopSale,
   getRecentSales, deleteSale, adminDeleteSale, getGoal, setGoal,
   getRanks, getRankForAmount,

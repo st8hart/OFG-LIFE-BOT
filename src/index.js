@@ -1,5 +1,6 @@
 // src/index.js
 require('dotenv').config();
+const crypto = require('crypto');
 const { Client, GatewayIntentBits, Events, Collection, REST, Routes, EmbedBuilder } = require('discord.js');
 const {
   addSale, getUserStats, getRankForAmount, getMonthlyTotal, getGoal, setGoal, getTeamStats,
@@ -12,7 +13,7 @@ const {
   getUserDailyTotal, getUserWeeklyTotal,
   getTeamDailyTotal,
   getTeamTree, recordUnassignedProducer,
-  getSaleById,
+  getSaleById, claimSaleAnnouncement, releaseSaleAnnouncement,
 } = require('./database');
 const { buildLeaderboardEmbed, formatMoney } = require('./leaderboard');
 const {
@@ -1429,15 +1430,35 @@ function scheduleLeaderboards(client) {
 //
 // Requires HUB_SHARED_SECRET set here and the same value on the hub. Without
 // it the door stays shut and the hub keeps posting its own plain embed.
-const announcedSales = new Set();
+/**
+ * Constant-time secret check.
+ *
+ * `!==` on strings stops at the first differing byte, so how long a rejection
+ * takes leaks how much of the secret was right — enough, over enough tries, to
+ * walk it out a character at a time. The value living between two Railway
+ * services is an argument for it being hard to reach, not for it being cheap to
+ * guess once somebody has the URL, and this endpoint makes the bot post to the
+ * whole team.
+ */
+function hubSecretMatches(provided) {
+  const expected = process.env.HUB_SHARED_SECRET || '';
+  if (!expected) return false;
+  const given = Buffer.from(String(provided || ''), 'utf8');
+  const want = Buffer.from(expected, 'utf8');
+  if (given.length !== want.length) {
+    // Compare something of the right shape anyway, so a wrong LENGTH doesn't
+    // come back measurably faster than a wrong value.
+    crypto.timingSafeEqual(want, want);
+    return false;
+  }
+  return crypto.timingSafeEqual(given, want);
+}
 
 function startHubListener() {
-  const secret = process.env.HUB_SHARED_SECRET;
-  if (!secret) {
-    console.warn('[hub] HUB_SHARED_SECRET not set — hub sales will not be announced by the bot.');
-    return;
-  }
   const port = process.env.PORT || 3000;
+  if (!process.env.HUB_SHARED_SECRET) {
+    console.warn('[hub] HUB_SHARED_SECRET not set — the door answers 503 and the hub posts its own embed.');
+  }
 
   require('http').createServer(async (req, res) => {
     const send = (code, obj) => {
@@ -1448,9 +1469,12 @@ function startHubListener() {
     if (req.method === 'GET' && req.url === '/health') return send(200, { ok: true, ready: client.isReady() });
     if (req.method !== 'POST' || req.url !== '/hub/sale-announce') return send(404, { error: 'not found' });
 
-    // Timing-safe would be nicer, but the value never leaves two Railway
-    // services and a mismatch is logged, not silently ignored.
-    if (req.headers['x-hub-secret'] !== secret) {
+    // 503, not 401: an unset secret is this service not being wired up yet, and
+    // the hub reads 503 as "nothing was posted" and falls back to its own embed.
+    // 401 would mean the same thing to the hub, but it would also mean "somebody
+    // knocked with the wrong key", which is worth being able to tell apart.
+    if (!process.env.HUB_SHARED_SECRET) return send(503, { error: 'HUB_SHARED_SECRET not set on the bot' });
+    if (!hubSecretMatches(req.headers['x-hub-secret'])) {
       console.warn('[hub] rejected a call with a bad secret');
       return send(401, { error: 'bad secret' });
     }
@@ -1466,15 +1490,22 @@ function startHubListener() {
     try { salesId = Number(JSON.parse(body || '{}').salesId); } catch { return send(400, { error: 'bad json' }); }
     if (!Number.isFinite(salesId) || salesId <= 0) return send(400, { error: 'salesId required' });
 
-    // A retry after a slow-but-successful call must not double-announce. The
-    // set is per-process, which is the same lifetime as the momentum and
-    // unassigned-producer guards above it.
-    if (announcedSales.has(salesId)) return send(200, { ok: true, announced: false, reason: 'already announced' });
-
+    let claimed = false;
     try {
       const sale = await getSaleById(salesId);
       if (!sale) return send(404, { error: 'sale not found' });
-      announcedSales.add(salesId);
+
+      // A retry after a slow-but-successful call must not double-announce, and
+      // the retry most likely to arrive is the one after a redeploy — so the
+      // claim is taken in the database rather than in a per-process Set, which
+      // a restart would forget at exactly the wrong moment. Claimed BEFORE
+      // anything is posted; see claimSaleAnnouncement in database.js.
+      claimed = await claimSaleAnnouncement(salesId);
+      if (!claimed) {
+        // 200, not an error: the sale HAS been announced, which is all the hub
+        // wanted. Anything else would send it off to post a duplicate.
+        return send(200, { ok: true, announced: false, reason: 'already announced' });
+      }
 
       // The name on the row is whatever the hub's roster last wrote. Apollo's
       // alerts have always used the Discord nickname — which in this server
@@ -1511,14 +1542,24 @@ function startHubListener() {
       send(200, { ok: true, announced: true });
     } catch (err) {
       // Let a genuine failure be retried: the sale is worth a second attempt.
-      announcedSales.delete(salesId);
+      // Only release a claim THIS request took — a failure in the lookup above
+      // must not hand back a claim a concurrent request is still announcing on.
+      if (claimed) {
+        try { await releaseSaleAnnouncement(salesId); }
+        catch (e) { console.error('[hub] could not release the claim:', e.message); }
+      }
       console.error('[hub] announce failed:', err);
       send(500, { error: err.message });
     }
   }).listen(port, () => console.log(`[hub] listening on ${port}`));
 }
 
-client.once(Events.ClientReady, startHubListener);
+// Before login, not after. Railway health-checks the port as soon as the deploy
+// starts, and the Discord gateway handshake is slow enough — and, with a bad
+// token, permanently enough — to fail that check and roll the deploy back. The
+// door itself answers 503 until the client is ready, which the hub reads as
+// "not now" and falls back to its own embed.
+startHubListener();
 
 client.login(process.env.DISCORD_TOKEN);
 
