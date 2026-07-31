@@ -94,7 +94,7 @@ client.once(Events.ClientReady, async (c) => {
     try {
       const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
       const r = await syncAllMembers({ rest, guildId: process.env.GUILD_ID });
-      console.log(`[member-sync] startup: scanned ${r.scanned}, added ${r.added} (auto-placed ${r.placedUnderRecruiter} under their recruiter)`);
+      console.log(`[member-sync] startup: scanned ${r.scanned}, added ${r.added} (auto-placed ${r.placedUnderRecruiter} under their recruiter, ${r.adopted || 0} into a held spot)`);
     } catch (err) { console.error('Member sync (startup) error:', err.message); }
   })();
 });
@@ -905,7 +905,7 @@ function scheduleLeaderboards(client) {
       try {
         const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
         const r = await syncAllMembers({ rest, guildId: process.env.GUILD_ID });
-        console.log(`[member-sync] daily: scanned ${r.scanned}, added ${r.added} (auto-placed ${r.placedUnderRecruiter} under their recruiter)`);
+        console.log(`[member-sync] daily: scanned ${r.scanned}, added ${r.added} (auto-placed ${r.placedUnderRecruiter} under their recruiter, ${r.adopted || 0} into a held spot)`);
       } catch (err) { console.error('Member sync error:', err.message); }
     }
 

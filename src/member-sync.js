@@ -19,7 +19,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const { Routes } = require('discord.js');
-const { getTeamMembersRaw, upsertTeamMember, getAllHiresForUpline } = require('./database');
+const { getTeamMembersRaw, upsertTeamMember, removeTeamMember, getAllHiresForUpline } = require('./database');
 
 // Normalize a name for matching: drop a trailing state/location tag ("Rob - FL",
 // "Tara (Texas)"), diacritics, and punctuation. Mirrors the hub's matcher so the
@@ -91,6 +91,38 @@ async function syncAllMembers({ rest, guildId, dryRun = false, onProgress = null
     if (!map.has(key)) map.set(key, new Set());
     map.get(key).add(val);
   };
+  // ── Placeholders waiting for the person to show up ────────────────────────
+  // A leader can hand us their org chart before half of it has joined. Those
+  // people get a `PENDING-<slug>` row — virtual, real upline — so the tree holds
+  // the answer instead of a screenshot holding it. See
+  // sql/2026-07-31-kibler-pending-ten.sql in the hub repo.
+  //
+  // This sweep only ever compared Discord IDS, so the day one of them joined it
+  // would happily add a SECOND row — real id, no upline — and split the person
+  // before they started. So: check the placeholders before adding anyone, and
+  // when the match is unambiguous, take the placeholder's place. Their real row
+  // is created carrying the upline a human already chose, and the placeholder is
+  // deleted. Nobody re-enters anything.
+  //
+  // Indexed by first+last as well as the full name, because the roster naming
+  // convention is `NAME - UPLINE - STATE` — Charisma Guidry arrives as
+  // "Charisma Guidry - Reiser - LA". Matching full names only would miss every
+  // person who follows the convention, which is most of the ones worth catching.
+  const placeholders = new Map();       // normName   -> placeholder rows
+  const placeholdersFirst2 = new Map(); // first+last -> placeholder rows
+  for (const r of existing) {
+    if (!String(r.user_id || '').startsWith('PENDING-')) continue;
+    const nn = normName(r.name);
+    if (!nn) continue;
+    addKey(placeholders, nn, r);
+    addKey(placeholdersFirst2, first2(nn), r);
+  }
+  const forgetPlaceholder = (row) => {
+    const nn = normName(row.name);
+    placeholders.delete(nn);
+    placeholdersFirst2.delete(first2(nn));
+  };
+
   const recruitersByName = new Map();   // full normName -> Set(recruiter_id)
   const recruitersByFirst2 = new Map(); // first+last    -> Set(recruiter_id)
   for (const h of hires) {
@@ -127,27 +159,72 @@ async function syncAllMembers({ rest, guildId, dryRun = false, onProgress = null
     return null;
   };
 
+  // The placeholder this arriving member was pre-placed as, or null. Full name
+  // first, then the first+last fallback that survives the `- UPLINE - STATE`
+  // suffix.
+  //
+  // THE UNIQUENESS TEST BELONGS ON THE PLACEHOLDER, NOT ON THE ARRIVING NAME.
+  // Counting arrivals by their own key looks like it catches collisions and does
+  // not: two people called Michael Neal show up as "Michael Neal" and "Michael
+  // Neal - Green - TX", which normalize to two DIFFERENT full-name keys, so each
+  // one is unique by its own key and the first to be processed silently adopts a
+  // spot that may belong to the other. A placeholder is always a clean "First
+  // Last", so the question that actually matters is how many arriving members
+  // collapse onto ITS first+last — and if that is not exactly one, we don't
+  // guess. They come in flat and a human decides, which is the same standard
+  // `confidentUpline` holds.
+  const claimants = (ph) => memberFirst2Count.get(first2(normName(ph.name))) || 0;
+  const matchPlaceholder = (name) => {
+    const nn = normName(name);
+    if (!nn) return null;
+    for (const [key, phMap] of [[nn, placeholders], [first2(nn), placeholdersFirst2]]) {
+      if (!key) continue;
+      const rows = phMap.get(key);
+      if (!rows || rows.size !== 1) continue;   // two placeholders share the name
+      const ph = [...rows][0];
+      if (claimants(ph) !== 1) return null;     // two arrivals answer to it
+      return ph;
+    }
+    return null;
+  };
+
   if (dryRun) {
-    const placeable = newcomers.filter((m) => confidentUpline(m.name)).length;
+    const placeable = newcomers.filter((m) => matchPlaceholder(m.name) || confidentUpline(m.name)).length;
     return {
       scanned: members.length,
       alreadyIn: members.length - newcomers.length,
       added: 0,
       placedUnderRecruiter: placeable,
+      adopting: newcomers.filter((m) => matchPlaceholder(m.name)).length,
       newcomers,
     };
   }
 
   let added = 0;
   let placed = 0;
+  let adopted = 0;
   for (const m of newcomers) {
     try {
-      const uplineId = confidentUpline(m.name);
+      // A pre-placed answer BEATS a guess from the hire data. Somebody read a
+      // leader's org chart and decided where this person goes; a recruiter match
+      // is inference. When a placeholder is waiting, take its upline.
+      const ph = matchPlaceholder(m.name);
+      const uplineId = ph ? ph.upline_id : confidentUpline(m.name);
       // Only id + name (+ uplineId when certain): upsertTeamMember is
       // read-merge-write, so a new row gets base_shop=false / is_master=null and
       // anyone already present is preserved. We only pass newcomers, so nothing
       // curated is ever touched; the upline is set only on a confident match.
       await upsertTeamMember(uplineId ? { userId: m.id, name: m.name, uplineId } : { userId: m.id, name: m.name });
+      // Real row first, placeholder second. If the delete fails the tree has a
+      // duplicate — visible, and the verify query in the SQL file looks for
+      // exactly that. Deleting first and then failing to insert would lose the
+      // upline nobody wrote down anywhere else.
+      if (ph) {
+        await removeTeamMember(ph.user_id);
+        forgetPlaceholder(ph);
+        adopted++;
+        console.log(`[member-sync] ${m.name} joined — adopted placeholder ${ph.user_id}, kept upline ${ph.upline_id || 'none'}`);
+      }
       added++;
       if (uplineId) placed++;
       if (onProgress && added % 50 === 0) onProgress(added);
@@ -160,6 +237,7 @@ async function syncAllMembers({ rest, guildId, dryRun = false, onProgress = null
     alreadyIn: members.length - newcomers.length,
     added,
     placedUnderRecruiter: placed,
+    adopted,
     newcomers: [],
   };
 }
