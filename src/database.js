@@ -688,11 +688,18 @@ async function getAllAgentFirstSales() {
 
 // ── Monthly champion ──────────────────────────────────────────────────────────
 
-async function getMonthlyChampion() {
-  const start = getMonthStart(false);
-  const { data, error } = await supabase.from('sales')
+// prevMonth = crown LAST month's champion. Required on the 1st, when the current
+// month is minutes old and has no sales in it yet.
+async function getMonthlyChampion(prevMonth = false) {
+  const start = getMonthStart(prevMonth);
+  let query = supabase.from('sales')
     .select('user_id, username, premium')
     .gte('created_at', start.toISOString());
+  if (prevMonth) {
+    // cap at this month's midnight so new-month sales don't bleed in
+    query = query.lt('created_at', getMonthStart(false).toISOString());
+  }
+  const { data, error } = await query;
   if (error || !data.length) return null;
   const map = {};
   for (const s of data) {

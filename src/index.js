@@ -778,12 +778,12 @@ function scheduleLeaderboards(client) {
     } catch (err) { console.error('Leaderboard error:', err.message); }
   };
 
-  const postFinalLeaderboard = async (period, intro, prevWeek = false, prevDay = false) => {
+  const postFinalLeaderboard = async (period, intro, prevWeek = false, prevDay = false, prevMonth = false) => {
     const channelId = process.env.LEADERBOARD_CHANNEL_ID;
     if (!channelId) return;
     try {
       const channel = await client.channels.fetch(channelId);
-      const embed = await buildLeaderboardEmbed(period, prevWeek, prevDay);
+      const embed = await buildLeaderboardEmbed(period, prevWeek, prevDay, prevMonth);
       embed.setColor(0xFFD700);
       await channel.send({ content: intro, embeds: [embed] });
     } catch (err) { console.error('Final leaderboard error:', err.message); }
@@ -791,24 +791,24 @@ function scheduleLeaderboards(client) {
 
   // Team / leadership leaderboard poster. Uses TEAM_LEADERBOARD_CHANNEL_ID if set,
   // otherwise falls back to the same channel as the producer boards.
-  const postTeamLeaderboard = async (period, intro = null, prevWeek = false, prevDay = false, final = false) => {
+  const postTeamLeaderboard = async (period, intro = null, prevWeek = false, prevDay = false, final = false, prevMonth = false) => {
     const channelId = process.env.TEAM_LEADERBOARD_CHANNEL_ID || process.env.LEADERBOARD_CHANNEL_ID;
     if (!channelId) return;
     try {
       const channel = await client.channels.fetch(channelId);
-      const embed = await buildTeamLeaderboardEmbed(period, prevWeek, prevDay);
+      const embed = await buildTeamLeaderboardEmbed(period, prevWeek, prevDay, prevMonth);
       if (final) embed.setColor(0xFFD700);
       await channel.send(intro ? { content: intro, embeds: [embed] } : { embeds: [embed] });
     } catch (err) { console.error('Team leaderboard error:', err.message); }
   };
 
   // Recruiting leaderboard poster — posts to the leaders channel (RECRUITING_CHANNEL_ID).
-  const postRecruitingLeaderboard = async (period, intro = null, prevWeek = false, prevDay = false, final = false) => {
+  const postRecruitingLeaderboard = async (period, intro = null, prevWeek = false, prevDay = false, final = false, prevMonth = false) => {
     const channelId = process.env.RECRUITING_CHANNEL_ID;
     if (!channelId) return;
     try {
       const channel = await client.channels.fetch(channelId);
-      const embed = await buildRecruitingLeaderboardEmbed(period, prevWeek, prevDay);
+      const embed = await buildRecruitingLeaderboardEmbed(period, prevWeek, prevDay, prevMonth);
       if (final) embed.setColor(0xFFD700);
       await channel.send(intro ? { content: intro, embeds: [embed] } : { embeds: [embed] });
     } catch (err) { console.error('Recruiting leaderboard error:', err.message); }
@@ -863,20 +863,22 @@ function scheduleLeaderboards(client) {
     if (now.getDate() === 1 && hour === 8 && min === 40 && !lastPosted[key('champion')]) {
       lastPosted[key('champion')] = true;
       try {
-        const champion = await getMonthlyChampion();
+        const champion = await getMonthlyChampion(true); // true = crown LAST month, not the new one
         const channelId = process.env.SALES_CHANNEL_ID;
         if (champion && channelId) {
           const ch = await client.channels.fetch(channelId);
           const rank = getRankForAmount(champion.total);
+          const closedMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+            .toLocaleString('en-US', { month: 'long' }).toUpperCase();
           await ch.send([
             ``,
-            `👑🏆 MONTHLY CHAMPION CROWNED! 🏆👑`,
+            `👑🏆 ${closedMonth} CHAMPION CROWNED! 🏆👑`,
             ``,
             `After an entire month of competition, one agent came out on TOP!`,
             ``,
             `CONGRATULATIONS to <@${champion.user_id}>!`,
             ``,
-            `💰 ${formatMoney(champion.total)} AP this month`,
+            `💰 ${formatMoney(champion.total)} AP last month`,
             `${rank.emoji} ${rank.name} - LEGENDARY performance!`,
             ``,
             `Tag your teammates - show them what ELITE looks like at OFG! 🔥🔥🔥`,
@@ -1169,7 +1171,7 @@ function scheduleLeaderboards(client) {
         `🚪➡️🚀 New month. Fresh start. New goals.`,
         `Let's make it even BIGGER! 📈🔥👑`,
         ``,
-      ].join('\n'));
+      ].join('\n'), false, false, true); // prevMonth — recap the month that just closed
     }
 
     // ── TEAM / LEADERSHIP LEADERBOARDS ──────────────────────────────────────────
@@ -1215,7 +1217,7 @@ function scheduleLeaderboards(client) {
     // Champion (8:40) → this team board (8:44) → Base Shop of the Month (8:48, finale).
     if (now.getDate() === 1 && hour === 8 && min === 44 && !lastPosted[key('team-final-monthly')]) {
       lastPosted[key('team-final-monthly')] = true;
-      postTeamLeaderboard('monthly', `🏛️ **OFG TEAM RECAP — THE MONTH IS CLOSED** 🏛️`, false, false, true);
+      postTeamLeaderboard('monthly', `🏛️ **OFG TEAM RECAP — THE MONTH IS CLOSED** 🏛️`, false, false, true, true); // final + prevMonth
     }
 
     // Top Base Shop of the WEEK — Monday 8:09am, the finale after the team weekly board.
@@ -1379,7 +1381,7 @@ function scheduleLeaderboards(client) {
         `🚪➡️🚀 New month. Fresh start. New goals.`,
         `Let's build it even BIGGER! 📈🔥🌱`,
         ``,
-      ].join('\n'), false, false, true);
+      ].join('\n'), false, false, true, true); // final + prevMonth
     }
 
     // Recruiter of the Month + Recruiting Base Shop of the Month — 1st at 8:54am,
@@ -1399,7 +1401,7 @@ function scheduleLeaderboards(client) {
               `After a full month of building, one recruiter stood above everyone...`,
               ``,
               `CONGRATULATIONS to <@${individual.id}>!`,
-              `🌱 ${individual.count} hire${individual.count === 1 ? '' : 's'} this month`,
+              `🌱 ${individual.count} hire${individual.count === 1 ? '' : 's'} last month`,
               `${individual.rankEmoji} ${individual.rankName}`,
               ``,
               `You didn't just recruit — you built the future of OFG. 🏗️🔥`,
