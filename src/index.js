@@ -1076,9 +1076,17 @@ function scheduleLeaderboards(client) {
       ].join('\n'), true);
     }
 
-    // New month personal goal reminder - 1st of month at 12:05pm (midday, its own moment
-    // instead of stacking on top of the early-morning wake-up posts). Offset 5 min past
-    // noon so it never collides with the Friday-only H2H Standings post at 12:00.
+    // ── GOAL-SETTING PUSH: three reminders to open the month ────────────────────
+    //   #1  1st, 12:05pm — the welcome. Sets the tone, no @everyone.
+    //   #2  1st,  5:30pm — end of day one, @everyone.
+    //   #3  2nd, 11:00am — last call, @everyone, catches the stragglers.
+    // All three are once-a-month milestone pings, so they're exempt from the
+    // weekend rule and fire on the 1st/2nd regardless of weekday (same precedent
+    // as the 15th mid-month check).
+
+    // #1 — 1st of month at 12:05pm (midday, its own moment instead of stacking on
+    // top of the early-morning wake-up posts). Offset 5 min past noon so it never
+    // collides with the Friday-only H2H Standings post at 12:00.
     if (now.getDate() === 1 && hour === 12 && min === 5 && !lastPosted[key('new-month-goals')]) {
       lastPosted[key('new-month-goals')] = true;
       try {
@@ -1112,6 +1120,69 @@ function scheduleLeaderboards(client) {
           ].join('\n'));
         }
       } catch (err) { console.error('New month goal reminder error:', err.message); }
+    }
+
+    // #2 — 1st of month at 5:30pm. Day one is closing; catch everyone who saw the
+    // noon post, meant to set it, and got busy. 17:30 is clear of the intraday
+    // board pairs (12/3/6/10pm on the hour).
+    if (now.getDate() === 1 && hour === 17 && min === 30 && !lastPosted[key('new-month-goals-2')]) {
+      lastPosted[key('new-month-goals-2')] = true;
+      try {
+        const salesChannelId = process.env.SALES_CHANNEL_ID;
+        if (salesChannelId) {
+          const ch = await client.channels.fetch(salesChannelId);
+          const monthName = now.toLocaleString('en-US', { month: 'long' }).toUpperCase();
+          await ch.send([
+            `@everyone`,
+            ``,
+            `🎯⏰ DAY ONE CHECK — IS YOUR ${monthName} GOAL SET? ⏰🎯`,
+            ``,
+            `The month is a few hours old and the board is already open. 📊`,
+            ``,
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+            ``,
+            `If you haven't locked in your personal production goal yet, do it before you log off tonight:`,
+            ``,
+            `👉 \`/mypersonalgoal\``,
+            ``,
+            `Ten seconds. Stays private — only YOU see your progress. But it's the difference between HOPING this month goes well and DECIDING it will. 🎯`,
+            ``,
+            `Team goal for ${monthName}: **$${(await getGoal()).toLocaleString()}** — everybody in. 🔥👑`,
+            ``,
+          ].join('\n'));
+        }
+      } catch (err) { console.error('Day-one goal reminder error:', err.message); }
+    }
+
+    // #3 — 2nd of month at 11:00am. Last call before the mid-month check on the
+    // 15th. Clear of the 9:30 challenge results and the 10:00/10:02 monthly boards.
+    if (now.getDate() === 2 && hour === 11 && min === 0 && !lastPosted[key('new-month-goals-3')]) {
+      lastPosted[key('new-month-goals-3')] = true;
+      try {
+        const salesChannelId = process.env.SALES_CHANNEL_ID;
+        if (salesChannelId) {
+          const ch = await client.channels.fetch(salesChannelId);
+          const monthName = now.toLocaleString('en-US', { month: 'long' }).toUpperCase();
+          await ch.send([
+            `@everyone`,
+            ``,
+            `🚨🎯 LAST CALL — ${monthName} GOALS 🚨🎯`,
+            ``,
+            `Day two. Some of you are already on the board putting up numbers. 📈`,
+            ``,
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+            ``,
+            `If your goal still isn't set, this is the last reminder you'll get until the 15th:`,
+            ``,
+            `👉 \`/mypersonalgoal\``,
+            ``,
+            `The floor is **$15,000** — that's the standard every writer is held to, not the target. Aim past it. 💪`,
+            ``,
+            `Don't let the month get going without a number on it. Set it now. 👑`,
+            ``,
+          ].join('\n'));
+        }
+      } catch (err) { console.error('Day-two goal reminder error:', err.message); }
     }
 
     // Mid-month goal check — 15th at 12:00pm (noon), @everyone, war room.
