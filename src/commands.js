@@ -65,15 +65,7 @@ const SALE_LEAD_TYPES = [
 const saleCommand = {
   data: new SlashCommandBuilder()
     .setName('sale')
-    // The "[v2]" is a marker, and it is here to answer one question: whether the
-    // /sale in somebody's picker is the one THIS app registered. Everything on
-    // this side checks out — right application, command registered to it, bot
-    // online, no interactions endpoint — and interactions still never arrive.
-    // If the picker shows this text, the command being clicked is ours and the
-    // problem is delivery. If it shows the old description, it belongs to a
-    // different application and that application is the one going unanswered.
-    // Safe to drop once /sale is answering again.
-    .setDescription('Log a new insurance sale [v2]')
+    .setDescription('Log a new insurance sale')
     .addStringOption(opt =>
       opt.setName('presentation_type')
         .setDescription('How was this policy presented?')
