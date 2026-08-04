@@ -74,6 +74,11 @@ client.rest.on('rateLimited', (info) => {
   console.warn(`[rest] rate limited ${info.timeToReset}ms on ${info.method} ${info.route}${info.global ? ' (GLOBAL)' : ''}`);
 });
 
+// Read by /diag. The only way to tell "Discord never sent us the interaction"
+// apart from "we got it and failed" is to record that it arrived at all.
+let lastInteraction = null;
+let lastRegistration = 'not attempted';
+
 // Tracks producers we've already alerted about being unassigned (per bot session),
 // so logging several deals while unplaced doesn't spam the channel.
 const alertedUnassigned = new Set();
@@ -112,11 +117,14 @@ client.once(Events.ClientReady, async (c) => {
       const body = commands.map(cmd => cmd.data.toJSON());
       await rest.put(Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID), { body });
       console.log(`Registered ${body.length} slash commands`);
+      lastRegistration = `ok: ${body.length} commands`;
     } else {
       console.warn('CLIENT_ID / GUILD_ID not set — skipping auto command registration.');
+      lastRegistration = 'skipped: CLIENT_ID / GUILD_ID not set';
     }
   } catch (err) {
     console.error('Command auto-registration failed:', err.message);
+    lastRegistration = `failed: ${err.message}`;
   }
   scheduleLeaderboards(client);
 
@@ -134,6 +142,11 @@ client.once(Events.ClientReady, async (c) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  lastInteraction = {
+    type: interaction.type,
+    name: interaction.commandName || interaction.customId || null,
+    at: new Date().toISOString(),
+  };
   if (interaction.isChatInputCommand()) {
     const command = client.commands.get(interaction.commandName);
     if (!command) return;
@@ -1606,6 +1619,56 @@ function startHubListener() {
     };
 
     if (req.method === 'GET' && req.url === '/health') return send(200, { ok: true, ready: client.isReady() });
+
+    // ── /diag ───────────────────────────────────────────────────────────────
+    // "The bot is online and /sale still hangs" has several causes that look
+    // identical from Discord, and the difference is only visible from in here:
+    //
+    //   lastInteraction stays null after someone runs /sale
+    //       → the interaction never reached the gateway. Either an Interactions
+    //         Endpoint URL is set on the application (Discord then delivers over
+    //         HTTP and the gateway never hears about it), or the /sale in the
+    //         picker belongs to a DIFFERENT application than the one running.
+    //   commands does not contain 'sale'
+    //       → this app never registered it; the command being clicked is some
+    //         other app's leftover, and it is answering nobody.
+    //   clientIdMatchesApp is false
+    //       → CLIENT_ID on Railway is not this bot's application, so the startup
+    //         registration wrote to the wrong app (or 403'd) — see registration.
+    //
+    // Nothing secret goes out: an application id, the bot's tag and its own
+    // command names are all public to anyone in the server.
+    if (req.method === 'GET' && req.url === '/diag') {
+      let commands = null, commandsError = null, interactionsEndpointHost = null;
+      try {
+        const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+        if (process.env.GUILD_ID && client.application?.id) {
+          const list = await rest.get(Routes.applicationGuildCommands(client.application.id, process.env.GUILD_ID));
+          commands = list.map(c => c.name).sort();
+        }
+        const me = await rest.get(Routes.currentApplication());
+        interactionsEndpointHost = me?.interactions_endpoint_url
+          ? new URL(me.interactions_endpoint_url).host
+          : null;
+      } catch (e) { commandsError = e.message; }
+
+      return send(200, {
+        ready: client.isReady(),
+        uptimeSec: Math.round(process.uptime()),
+        botTag: client.user?.tag || null,
+        appId: client.application?.id || null,
+        clientIdMatchesApp: !!client.application?.id && process.env.CLIENT_ID === client.application.id,
+        guildIdSet: !!process.env.GUILD_ID,
+        // Set = Discord posts interactions to that URL instead of over the
+        // gateway, and every slash command hangs exactly like this one does.
+        interactionsEndpointHost,
+        registration: lastRegistration,
+        commands,
+        commandsError,
+        lastInteraction,
+      });
+    }
+
     if (req.method !== 'POST' || req.url !== '/hub/sale-announce') return send(404, { error: 'not found' });
 
     // 503, not 401: an unset secret is this service not being wired up yet, and
