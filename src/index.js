@@ -40,6 +40,40 @@ const {
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
+// ── Stay up, and say why ──────────────────────────────────────────────────────
+// Node 15+ kills the process on an unhandled promise rejection. This bot is full
+// of fire-and-forget async work — the startup member sync, the scheduled
+// leaderboards, the hub door — and one stray rejection in any of them takes the
+// whole bot down. Railway restarts it, but every interaction in that window gets
+// no answer at all: the agent sees the option prompts (Discord draws those from
+// its own command list, bot or no bot) and then "Sending command…" forever,
+// because a modal is the first thing that needs a live process.
+//
+// Logging beats dying. A wedged bot that prints its reason is fixable from the
+// Railway logs; a crash loop is a silent /sale outage.
+process.on('unhandledRejection', (err) => {
+  console.error('[guard] unhandled rejection — staying up:', err);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[guard] uncaught exception — staying up:', err);
+});
+
+// The gateway going quiet looks exactly like the bot being down, from the
+// inside of Discord. None of this was logged before, so an outage left nothing
+// behind to read.
+client.on(Events.Error, (err) => console.error('[gateway] client error:', err));
+client.on(Events.ShardDisconnect, (event, id) =>
+  console.error(`[gateway] shard ${id} disconnected (${event?.code}) — commands will hang until it resumes`));
+client.on(Events.ShardReconnecting, (id) => console.warn(`[gateway] shard ${id} reconnecting`));
+client.on(Events.ShardResume, (id) => console.log(`[gateway] shard ${id} resumed`));
+
+// A global 429 queues every REST call the bot makes, including showModal. The
+// interaction token dies after 3 seconds, so a rate limit and a dead process are
+// the same symptom in Discord and completely different fixes here.
+client.rest.on('rateLimited', (info) => {
+  console.warn(`[rest] rate limited ${info.timeToReset}ms on ${info.method} ${info.route}${info.global ? ' (GLOBAL)' : ''}`);
+});
+
 // Tracks producers we've already alerted about being unassigned (per bot session),
 // so logging several deals while unplaced doesn't spam the channel.
 const alertedUnassigned = new Set();
@@ -103,12 +137,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isChatInputCommand()) {
     const command = client.commands.get(interaction.commandName);
     if (!command) return;
+    // Breadcrumb, on purpose. If /sale hangs and this line is NOT in the Railway
+    // log, the interaction never reached the bot — that's the gateway, not the
+    // command. If it IS there and the next line is an error, it's the command.
+    console.log(`[interaction] /${interaction.commandName} from ${interaction.user?.tag || interaction.user?.id}`);
     try { await command.execute(interaction); }
     catch (err) {
-      console.error(err);
-      const msg = { content: 'Something went wrong.', ephemeral: true };
-      if (interaction.replied || interaction.deferred) await interaction.followUp(msg);
-      else await interaction.reply(msg);
+      console.error(`[interaction] /${interaction.commandName} failed:`, err);
+      // The apology can fail too — most often because the token that just
+      // expired is the same one we'd have to reply on. Unguarded, that second
+      // throw escaped this listener as an unhandled rejection and used to take
+      // the process with it, turning one failed command into a restart that
+      // swallowed everyone else's.
+      try {
+        const msg = { content: 'Something went wrong.', ephemeral: true };
+        if (interaction.replied || interaction.deferred) await interaction.followUp(msg);
+        else await interaction.reply(msg);
+      } catch (replyErr) {
+        console.error('[interaction] could not even report the failure:', replyErr.message);
+      }
     }
     return;
   }
